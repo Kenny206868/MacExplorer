@@ -5,7 +5,7 @@ import ExplorerCore
 @MainActor final class BrowserTab: ObservableObject, Identifiable {
     let id = UUID()
     @Published var history: NavigationHistory
-    @Published var entries: [FileEntry] = []
+    @Published var entries: [FileEntry] = [] { didSet { invalidatePresentation() } }
     @Published var selection: Set<URL> = []
     @Published var query = "" { didSet { if query != oldValue { scheduleSearch() } } }
     @Published var allLocations = false { didSet { scheduleSearch() } }
@@ -14,7 +14,22 @@ import ExplorerCore
     @Published var warnings: [String] = []
     @Published var truncated = false
     @Published var previewURL: URL?
-    @Published var options: FolderOptions { didSet { PreferenceStore.shared.remember(location, options) } }
+    @Published var options: FolderOptions {
+        didSet {
+            if options.sort != oldValue.sort || options.descending != oldValue.descending || options.foldersFirst != oldValue.foldersFirst || options.group != oldValue.group { invalidatePresentation() }
+            PreferenceStore.shared.remember(location, options)
+        }
+    }
+    private var cachedPresentation: FilePresentation?
+    private(set) var presentationBuilds = 0
+    private var presentation: FilePresentation {
+        if let cachedPresentation { return cachedPresentation }
+        let value = FilePresentation(entries: entries, options: options)
+        cachedPresentation = value; presentationBuilds += 1
+        return value
+    }
+    func invalidatePresentation() { cachedPresentation = nil }
+    var selectedEntries: [FileEntry] { presentation.selected(selection) }
     var selectionAnchor: URL?
     @Published var focusedURL: URL?
     var rangeBaseline: Set<URL>?
@@ -25,7 +40,7 @@ import ExplorerCore
         get { ExplorerSelection(selected: selection, anchor: selectionAnchor, focus: focusedURL) }
         set { selection = newValue.selected; selectionAnchor = newValue.anchor; focusedURL = newValue.focus }
     }
-    var displayEntries: [FileEntry] { options.group == .none ? visibleEntries : groups.flatMap { $0.1 } }
+    var displayEntries: [FileEntry] { presentation.ordered }
     func revealAfterRefresh(_ urls: [URL]) { refresh(selecting: urls) }
     let service = FileService()
     private var work: Task<Void, Never>?
@@ -33,29 +48,11 @@ import ExplorerCore
     private let spotlight = SpotlightSearch()
     private var generation = 0
     var location: Location { history.current }
-    var visibleEntries: [FileEntry] { options.sorted(entries) }
-    var groups: [(String, [FileEntry])] {
-        let files = visibleEntries
-        guard options.group != .none else { return [("", files)] }
-        let dictionary = Dictionary(grouping: files) { file -> String in
-            switch options.group {
-            case .none: return ""
-            case .kind: return file.kind
-            case .tags: return file.tags.first ?? "Untagged"
-            case .modified:
-                if Calendar.current.isDateInToday(file.modified) { return "Today" }
-                if Calendar.current.isDateInYesterday(file.modified) { return "Yesterday" }
-                return file.modified.formatted(.dateTime.year().month(.wide))
-            }
-        }
-        return dictionary.keys.sorted().map { ($0, dictionary[$0] ?? []) }
-    }
+    var visibleEntries: [FileEntry] { presentation.sorted }
+    var groups: [(String, [FileEntry])] { presentation.groups.map { ($0.title, $0.entries) } }
     init(_ location: Location) { history = NavigationHistory(location); options = PreferenceStore.shared.folderOptions(location) }
     func stop() { generation += 1; work?.cancel(); spotlight.stop(); watcher.stop() }
-    func refresh(selecting urls: [URL]) {
-        pendingSelection = Set(urls)
-        refresh()
-    }
+    func refresh(selecting urls: [URL]) { pendingSelection = Set(urls); refresh() }
     private func resetSelection() {
         selection = []; selectionAnchor = nil; focusedURL = nil
         rangeBaseline = nil; pendingSelection = nil; typeAhead = TypeAheadSearch()
@@ -158,16 +155,18 @@ import ExplorerCore
 @MainActor final class SpotlightSearch {
     private var query: NSMetadataQuery?
     private var observers: [NSObjectProtocol] = []
+    private var generation = 0
     func start(expression: SearchExpression, root: URL?, receive: @escaping @MainActor ([URL], Bool) -> Void) {
         stop()
+        let token = generation
         let query = NSMetadataQuery(); self.query = query
         query.searchScopes = root.map { [$0.path] } ?? [NSMetadataQueryLocalComputerScope]
         query.predicate = expression.spotlightPredicate
         query.notificationBatchingInterval = 0.3
         for name in [Notification.Name.NSMetadataQueryDidFinishGathering, .NSMetadataQueryDidUpdate] {
-            observers.append(NotificationCenter.default.addObserver(forName: name, object: query, queue: .main) { [weak query] _ in
+            observers.append(NotificationCenter.default.addObserver(forName: name, object: query, queue: .main) { [weak self] _ in
                 Task { @MainActor in
-                    guard let query else { return }
+                    guard let self, self.generation == token, let query = self.query else { return }
                     query.disableUpdates()
                     let urls = (query.results as? [NSMetadataItem] ?? []).compactMap { ($0.value(forAttribute: NSMetadataItemPathKey) as? String).map { URL(fileURLWithPath: $0) } }
                     query.enableUpdates(); receive(urls, query.isGathering)
@@ -176,6 +175,6 @@ import ExplorerCore
         }
         if !query.start() { receive([], false) }
     }
-    func stop() { query?.stop(); query = nil; observers.forEach(NotificationCenter.default.removeObserver); observers.removeAll() }
+    func stop() { generation += 1; query?.stop(); query = nil; observers.forEach(NotificationCenter.default.removeObserver); observers.removeAll() }
     deinit { query?.stop(); observers.forEach(NotificationCenter.default.removeObserver) }
 }

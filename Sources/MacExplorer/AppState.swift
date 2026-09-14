@@ -121,7 +121,6 @@ struct ConflictPrompt: Identifiable {
         if !result.skippedSources.isEmpty { row.status += " — \(result.skippedSources.count) skipped" }
         if !result.receipt.steps.isEmpty { undoStack.append(result.receipt); redoStack.removeAll() }
         revision += 1
-        // Never discard active jobs or recovery receipts while trimming presentation history.
         if jobs.count > 100 { jobs = Array(jobs.filter { !$0.finished } + jobs.filter(\.finished).prefix(100)) }
     }
     func undo(redo: Bool = false) {
@@ -164,7 +163,7 @@ enum ExplorerSheet: String, Identifiable { case newFolder, newFile, rename, prop
     let preferences = PreferenceStore.shared
     let operations = OperationCenter.shared
     var current: BrowserTab { tabs.first(where: { $0.id == activeID }) ?? tabs[0] }
-    var selected: [FileEntry] { current.displayEntries.filter { current.selection.contains($0.url) } }
+    var selected: [FileEntry] { current.selectedEntries }
     var selectedURLs: [URL] { selected.map(\.url) }
     var destination: URL? { current.location.directory }
     init(session: BrowserSession? = nil) {
@@ -241,7 +240,6 @@ enum ExplorerSheet: String, Identifiable { case newFolder, newFile, rename, prop
     func fail(_ title: String, _ text: String) { message = MessageBox(title: title, message: text) }
     func resolve(_ collision: FileCollision, operationID: UUID, control: OperationControl) async -> CollisionAnswer {
         guard !control.isCancelled else { return CollisionAnswer(.cancel) }
-        // Never suspend the global operation queue behind a prompt in a closed window.
         guard window?.isVisible == true else { return CollisionAnswer(.cancel) }
         sheet = nil
         return await withCheckedContinuation { continuation in conflict = ConflictPrompt(collision: collision, operationID: operationID, continuation: continuation) }

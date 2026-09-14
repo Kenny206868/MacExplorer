@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - name: Capture production SwiftUI views and validate native layout
+      - name: Capture production SwiftUI views and validate native layout and state
         run: |
           set -o pipefail
           mkdir -p artifacts/native-views
@@ -28,7 +28,7 @@ jobs:
           swift --version >> artifacts/native-views/toolchain.txt
           uname -m >> artifacts/native-views/toolchain.txt
           git rev-parse HEAD > artifacts/native-views/COMMIT.txt
-          swift test --filter 'NativeViewSnapshotTests|WorkspaceLayoutIntegrationTests' 2>&1 | tee artifacts/native-views/test.log
+          swift test --filter MacExplorerUITests 2>&1 | tee artifacts/native-views/test.log
       - name: Validate coverage, dimensions, and render content
         run: python3 scripts/validate-snapshots.py artifacts/native-views
       - name: Upload native PNGs, test log, and offline review gallery
