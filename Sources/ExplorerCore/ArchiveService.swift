@@ -42,65 +42,88 @@ public enum ArchiveService {
         return target
     }
 
-    /// Archives are extracted into an isolated new directory. Absolute/traversing paths,
-    /// links and special files are rejected, not normalized into apparently safe names.
-    /// ZIP, tar, gzip, bzip2 and other formats depend on the macOS libarchive build.
-    public static func extract(_ source: URL, to directory: URL, control: OperationControl, maximumBytes: Int64 = 20_000_000_000, maximumEntries: Int = 100_000) throws -> URL {
+    /// Staging is private and installation is all-or-nothing. Passwords are passed
+    /// directly to libarchive, never to a subprocess or persistent model.
+    public static func extract(_ source: URL, to directory: URL, control: OperationControl,
+                               maximumBytes: Int64 = 20_000_000_000, maximumEntries: Int = 100_000,
+                               options: ArchiveReadOptions? = nil) throws -> URL {
+        let options = options ?? ArchiveReadOptions(maximumBytes: maximumBytes, maximumEntries: maximumEntries)
         let manager = FileManager.default
+        let sourceIdentity = try FileFingerprint(source)
+        let parentIdentity = try FileFingerprint(directory)
+        let quarantine = try (source as NSURL).resourceValues(forKeys: [.quarantinePropertiesKey])[.quarantinePropertiesKey]
         let stage = directory.appendingPathComponent(".MacExplorer-extract-" + UUID().uuidString, isDirectory: true)
         try manager.createDirectory(at: stage, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
         var committed = false
         defer { if !committed { try? manager.removeItem(at: stage) } }
-        guard let archive = archive_read_new() else { throw ExplorerError.message("Cannot allocate archive reader.") }
-        defer { archive_read_free(archive) }
-        archive_read_support_filter_all(archive); archive_read_support_format_all(archive)
-        guard archive_read_open_filename(archive, source.path, 65_536) == ARCHIVE_OK else { throw archiveError(archive) }
-        var entry: OpaquePointer?, total: Int64 = 0, count = 0
+        let reader = try ArchiveReader(source: source, options: options)
+        var total: Int64 = 0, declaredTotal: Int64 = 0, count = 0, seen = Set<String>()
+        var directories: [(URL, Date?)] = []
         var buffer = [UInt8](repeating: 0, count: 65_536)
-        while true {
-            try control.checkpoint()
-            let status = archive_read_next_header(archive, &entry)
-            if status == ARCHIVE_EOF { break }
-            guard status == ARCHIVE_OK, let entry, let namePointer = archive_entry_pathname(entry) else { throw archiveError(archive) }
+        while let entry = try reader.next(control: control) {
             count += 1
-            guard count <= maximumEntries else { throw ExplorerError.message("Archive exceeds the 100,000-entry safety limit.") }
-            let name = String(cString: namePointer)
-            let components = name.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
-            guard !name.hasPrefix("/"), !name.contains("\\"), !components.contains(".."), !components.contains(where: { $0.contains(":") }), !components.isEmpty else { throw ExplorerError.message("Unsafe archive path: \(name)") }
-            guard archive_entry_symlink(entry) == nil, archive_entry_hardlink(entry) == nil else { throw ExplorerError.message("Archive links are not extracted. Extract this trusted archive with a dedicated archive utility.") }
-            let filetype = archive_entry_filetype(entry)
-            // POSIX file types are stable across Darwin and libarchive.
-            guard filetype == 0o040000 || filetype == 0o100000 else { throw ExplorerError.message("Archive contains a device, socket, or unsupported entry: \(name)") }
-            let destination = components.reduce(stage) { $0.appendingPathComponent($1) }
+            guard count <= options.maximumEntries else { throw ExplorerError.message("Archive exceeds the configured entry limit.") }
+            let type = archive_entry_filetype(entry)
+            guard let name = try ArchivePath.parse(reader.name(entry), directory: type == 0o040000) else { continue }
+            guard seen.insert(name).inserted else { throw ExplorerError.message("Duplicate archive entry: \(name)") }
+            guard archive_entry_symlink(entry) == nil, archive_entry_hardlink(entry) == nil,
+                  type == 0o040000 || type == 0o100000 else {
+                throw ExplorerError.message("Archive contains a link or unsupported special object: \(name)")
+            }
+            let declared = archive_entry_size_is_set(entry) != 0 ? max(0, archive_entry_size(entry)) : 0
+            let (nextDeclared, overflow) = declaredTotal.addingReportingOverflow(declared)
+            guard !overflow, nextDeclared <= options.maximumBytes else { throw ExplorerError.message("Archive exceeds the configured expanded-size limit.") }
+            declaredTotal = nextDeclared
+            guard options.includes(name) else { continue }
+            let destination = name.split(separator: "/").reduce(stage) { $0.appendingPathComponent(String($1)) }
             guard FileNames.isDescendant(destination, of: stage) else { throw ExplorerError.message("Archive entry escapes extraction directory.") }
-            if filetype == 0o040000 {
+            if type == 0o040000 {
                 try manager.createDirectory(at: destination, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+                directories.append((destination, ArchiveReader.modificationDate(entry)))
                 continue
             }
             try manager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             guard !FileNames.exists(destination) else { throw ExplorerError.message("Duplicate archive entry: \(name)") }
             try Data().write(to: destination, options: .withoutOverwriting)
-            let handle = try FileHandle(forWritingTo: destination)
+            let output = try FileHandle(forWritingTo: destination)
             do {
                 while true {
                     try control.checkpoint()
-                    let read = buffer.withUnsafeMutableBytes { archive_read_data(archive, $0.baseAddress, $0.count) }
+                    let read = buffer.withUnsafeMutableBytes { archive_read_data(reader.handle, $0.baseAddress, $0.count) }
                     if read == 0 { break }
-                    guard read > 0 else { throw archiveError(archive) }
-                    total += Int64(read)
-                    guard total <= maximumBytes else { throw ExplorerError.message("Archive exceeds the 20 GB expanded-size safety limit.") }
-                    try handle.write(contentsOf: Data(buffer.prefix(Int(read))))
+                    guard read > 0 else { throw ArchiveReader.error(reader.handle) }
+                    let (next, overflow) = total.addingReportingOverflow(Int64(read))
+                    guard !overflow, next <= options.maximumBytes else { throw ExplorerError.message("Archive exceeds the configured expanded-size limit.") }
+                    total = next
+                    try output.write(contentsOf: Data(buffer.prefix(Int(read))))
                 }
-                try handle.close()
-            } catch { try? handle.close(); throw error }
+                try output.close()
+            } catch { try? output.close(); throw error }
             let mode = Int(archive_entry_perm(entry)) & 0o777
-            try manager.setAttributes([.posixPermissions: mode == 0 ? 0o600 : mode & ~0o022], ofItemAtPath: destination.path)
+            // Keep the owner able to manage the new working copy, remove set-id
+            // and group/world write bits; never recreate archived ownership.
+            var attributes: [FileAttributeKey: Any] = [.posixPermissions: (mode & ~0o022) | 0o600]
+            if let date = ArchiveReader.modificationDate(entry) { attributes[.modificationDate] = date }
+            try manager.setAttributes(attributes, ofItemAtPath: destination.path)
+        }
+        for (url, date) in directories.reversed() {
+            if let date { try manager.setAttributes([.modificationDate: date], ofItemAtPath: url.path) }
+        }
+        if let quarantine {
+            try (stage as NSURL).setResourceValue(quarantine, forKey: .quarantinePropertiesKey)
+            if let enumerator = manager.enumerator(at: stage, includingPropertiesForKeys: nil) {
+                for case let url as URL in enumerator {
+                    try control.checkpoint()
+                    try (url as NSURL).setResourceValue(quarantine, forKey: .quarantinePropertiesKey)
+                }
+            }
+        }
+        try control.checkpoint()
+        guard sourceIdentity.matches(source), parentIdentity.matchesIdentity(directory) else {
+            throw ExplorerError.message("The archive or destination folder changed during extraction. Nothing was installed.")
         }
         let target = FileNames.unique(directory.appendingPathComponent(source.deletingPathExtension().lastPathComponent, isDirectory: true))
         try manager.moveItem(at: stage, to: target); committed = true
         return target
-    }
-    private static func archiveError(_ archive: OpaquePointer) -> ExplorerError {
-        .message(archive_error_string(archive).map { String(cString: $0) } ?? "Archive operation failed.")
     }
 }
