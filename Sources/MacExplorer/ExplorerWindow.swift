@@ -12,36 +12,61 @@ struct ExplorerWindow: View {
     @EnvironmentObject private var preferences: PreferenceStore
     @ObservedObject private var operations = OperationCenter.shared
     var body: some View {
-        WorkspaceShell(workspace: workspace, tab: workspace.current)
-            .environmentObject(workspace)
-            .focusedSceneValue(\.explorerWorkspace, workspace)
-            .focusedSceneObject(workspace)
+        WindowWorkspaceShell(workspace: workspace)
+            .environmentObject(workspace.routedWorkspace)
+            .focusedSceneValue(\.explorerWorkspace, workspace.routedWorkspace)
+            .focusedSceneObject(workspace.routedWorkspace)
             .background(WindowAccessor(owner: workspace).frame(width: 0, height: 0))
             .frame(minWidth: 800, minHeight: 500)
+            .modifier(WorkspaceDialogs(workspace: workspace.routedWorkspace))
             .onAppear {
-                AppRouter.shared.active = workspace
+                AppRouter.shared.active = workspace.routedWorkspace
                 WorkspaceSessionCoordinator.shared.register(workspace)
                 WorkspaceSessionCoordinator.shared.restoreAdditionalWindows { openWindow(id: "restored-session", value: $0) }
-                workspace.current.refresh()
+                refreshVisible()
                 Task { @MainActor in
-                    await Task.yield()
-                    if let frame = workspace.restorationFrame, let window = workspace.window {
-                        window.restoreExplorerFrame(frame); workspace.restorationFrame = nil
-                    }
+                    await Task.yield(); workspace.dualPane?.secondary.window = workspace.window
+                    if let frame = workspace.restorationFrame, let window = workspace.window { window.restoreExplorerFrame(frame); workspace.restorationFrame = nil }
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { notification in
                 if let window = notification.object as? NSWindow, window == workspace.window { WorkspaceSessionCoordinator.shared.close(workspace) }
             }
-            .onDisappear { workspace.answerCollision(.cancel); workspace.saveSession(); workspace.tabs.forEach { $0.stop() } }
-            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { notification in
-                if let window = notification.object as? NSWindow, window == workspace.window { AppRouter.shared.active = workspace; FileClipboard.shared.refresh() }
+            .onDisappear {
+                workspace.answerCollision(.cancel); workspace.dualPane?.secondary.answerCollision(.cancel)
+                workspace.saveSession(); workspace.tabs.forEach { $0.stop() }; workspace.dualPane?.secondary.tabs.forEach { $0.stop() }
             }
-            .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didMountNotification)) { _ in workspace.current.refresh(); workspace.objectWillChange.send() }
-            .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didUnmountNotification)) { _ in workspace.current.refresh(); workspace.objectWillChange.send() }
-            .onChange(of: workspace.activeID) { _, _ in workspace.current.refresh(); workspace.saveSession() }
-            .onChange(of: operations.revision) { _, _ in workspace.current.refresh() }
-            .onChange(of: preferences.value.showHidden) { _, _ in workspace.current.refresh() }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { notification in
+                if let window = notification.object as? NSWindow, window == workspace.window {
+                    workspace.dualPane?.secondary.window = window; AppRouter.shared.active = workspace.routedWorkspace; FileClipboard.shared.refresh()
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .explorerNewWindow)) { notification in
+                if notification.object as? UUID == workspace.id { openWindow(id: "explorer") }
+            }
+            .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didMountNotification)) { _ in refreshVisible(); workspace.objectWillChange.send() }
+            .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didUnmountNotification)) { _ in refreshVisible(); workspace.objectWillChange.send() }
+            .onChange(of: workspace.activeID) { _, _ in if workspace.dualPane == nil { workspace.current.refresh() }; workspace.saveSession() }
+            .onChange(of: operations.revision) { _, _ in refreshVisible() }
+            .onChange(of: preferences.value.showHidden) { _, _ in refreshVisible() }
+            .confirmationDialog("Move to the other pane?", isPresented: Binding(get: { workspace.pendingPaneTransfer != nil }, set: { if !$0 { workspace.pendingPaneTransfer = nil } }), titleVisibility: .visible) {
+                Button("Move Items") { workspace.confirmPaneTransfer() }
+                Button("Cancel", role: .cancel) { workspace.pendingPaneTransfer = nil }
+            } message: {
+                if let request = workspace.pendingPaneTransfer {
+                    Text("Move \(request.job.sources.count) item(s) to \(request.job.destination?.path ?? ""). Existing items require a separate collision decision.")
+                }
+            }
+    }
+    private func refreshVisible() {
+        if let dual = workspace.dualPane { dual.refreshVisible() } else { workspace.current.refresh() }
+    }
+}
+
+private struct WorkspaceDialogs: ViewModifier {
+    @ObservedObject var workspace: ExplorerWorkspace
+    func body(content: Content) -> some View {
+        content
             .sheet(item: $workspace.sheet) { sheet in ExplorerSheetView(sheet: sheet, workspace: workspace) }
             .sheet(item: $workspace.conflict) { prompt in CollisionView(prompt: prompt, workspace: workspace).interactiveDismissDisabled() }
             .alert(item: $workspace.message) { message in Alert(title: Text(message.title), message: Text(message.message), dismissButton: .default(Text("OK"))) }

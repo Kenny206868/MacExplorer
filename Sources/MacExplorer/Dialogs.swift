@@ -15,19 +15,23 @@ struct ExplorerSheetView: View {
             case .connect: ConnectSheet(workspace: workspace)
             case .operations: OperationsView(workspace: workspace)
             case .recovery: RecoveryView(workspace: workspace)
-            case .archive:
-                if let source = workspace.selectedURLs.first { ArchiveBrowserSheet(workspace: workspace, source: source) }
+            case .fileActions: FileActionSheet(workspace: workspace)
+            case .keyboardHelp: KeyboardHelpView()
+            case .archive: if let source = workspace.selectedURLs.first { ArchiveBrowserSheet(workspace: workspace, source: source) }
             }
-        }.environmentObject(workspace.preferences)
+        }.environmentObject(workspace.preferences).foregroundStyle(ExplorerDesign.text).background(ExplorerDesign.canvas)
     }
 }
-
 struct SheetHeading: View {
     let title: String
     let subtitle: String
-    var body: some View { VStack(alignment: .leading, spacing: 8) { Text(title).font(.system(size: 20, weight: .semibold)); Text(subtitle).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }.frame(maxWidth: .infinity, alignment: .leading) }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.system(size: 20, weight: .semibold))
+            Text(subtitle).font(.callout).foregroundStyle(ExplorerDesign.muted).fixedSize(horizontal: false, vertical: true)
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
 }
-
 struct NewItemSheet: View {
     @ObservedObject var workspace: ExplorerWorkspace
     let folder: Bool
@@ -40,20 +44,21 @@ struct NewItemSheet: View {
             SheetHeading(title: folder ? "New folder" : "New text document", subtitle: workspace.destination?.path ?? "Choose a folder first.")
             TextField("Name", text: $name).textFieldStyle(.roundedBorder).focused($focused).onSubmit(create)
             if let error { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red).font(.caption) }
-            HStack { Spacer(); Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction); Button("Create", action: create).buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(workspace.destination == nil) }
+            HStack {
+                Spacer(); Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Create", action: create).buttonStyle(ExplorerButtonStyle(primary: true)).keyboardShortcut(.defaultAction).disabled(workspace.destination == nil)
+            }
         }.padding(25).frame(width: 440).onAppear { name = folder ? "New folder" : "Untitled.txt"; focused = true }
     }
     private func create() {
         do {
-            try FileNames.validate(name)
-            guard let directory = workspace.destination else { return }
+            try FileNames.validate(name); guard let directory = workspace.destination else { return }
             let target = directory.appendingPathComponent(name)
             guard !FileNames.exists(target) else { throw ExplorerError.message("An item with that name already exists.") }
             workspace.operations.submit(FileJob(folder ? .createFolder : .createFile, destination: target), owner: workspace); dismiss()
         } catch { self.error = error.localizedDescription }
     }
 }
-
 struct RenameSheet: View {
     @ObservedObject var workspace: ExplorerWorkspace
     @Environment(\.dismiss) private var dismiss
@@ -99,12 +104,15 @@ struct RenameSheet: View {
                 ScrollView {
                     Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 10) {
                         GridRow { Text("Original").fontWeight(.semibold); Text("New name").fontWeight(.semibold) }
-                        ForEach(Array(mapping.enumerated()), id: \.offset) { _, pair in GridRow { Text(pair.0.lastPathComponent).foregroundStyle(.secondary); Text(pair.1) } }
+                        ForEach(Array(mapping.enumerated()), id: \.offset) { _, pair in GridRow { Text(pair.0.lastPathComponent).foregroundStyle(ExplorerDesign.muted); Text(pair.1) } }
                     }.font(.system(size: 12)).frame(maxWidth: .infinity, alignment: .leading).padding(12)
-                }.frame(height: 220).background(.quaternary.opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
+                }.frame(height: 220).background(ExplorerDesign.chrome, in: RoundedRectangle(cornerRadius: 8))
             }
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
-            HStack { Spacer(); Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction); Button("Rename", action: apply).buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(originals.isEmpty) }
+            HStack {
+                Spacer(); Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Rename", action: apply).buttonStyle(ExplorerButtonStyle(primary: true)).keyboardShortcut(.defaultAction).disabled(originals.isEmpty)
+            }
         }.padding(25).frame(width: originals.count > 1 ? 610 : 440)
             .onAppear { originals = workspace.selected.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }; name = originals.first?.name ?? "" }
     }
@@ -112,12 +120,10 @@ struct RenameSheet: View {
         do {
             let mapping = mapping.filter { $0.0.lastPathComponent != $0.1 }
             for pair in mapping { try FileNames.validate(pair.1) }
-            if !mapping.isEmpty { workspace.operations.rename(mapping, owner: workspace) }
-            dismiss()
+            if !mapping.isEmpty { workspace.operations.rename(mapping, owner: workspace) }; dismiss()
         } catch { self.error = error.localizedDescription }
     }
 }
-
 struct TagsSheet: View {
     @ObservedObject var workspace: ExplorerWorkspace
     @Environment(\.dismiss) private var dismiss
@@ -132,22 +138,23 @@ struct TagsSheet: View {
             HStack { ForEach(["Red", "Orange", "Yellow", "Green", "Blue", "Purple", "Gray"], id: \.self) { tag in Button(tag) { text = text.isEmpty ? tag : text + ", " + tag }.font(.caption) } }
             if workspace.selected.count > 1 { Toggle("Add to existing tags instead of replacing them", isOn: $append) }
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
-            HStack { Spacer(); Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(working); Button(working ? "Saving…" : "Save", action: save).buttonStyle(.borderedProminent).disabled(working).keyboardShortcut(.defaultAction) }
+            HStack {
+                Spacer(); Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(working)
+                Button(working ? "Saving…" : "Save", action: save).buttonStyle(ExplorerButtonStyle(primary: true)).disabled(working).keyboardShortcut(.defaultAction)
+            }
         }.padding(25).frame(width: 510).onAppear { if workspace.selected.count == 1 { text = workspace.selected[0].tags.joined(separator: ", ") } }
     }
     private func save() {
         let tags = Array(Set(text.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })).sorted()
-        let selected = workspace.selected
-        working = true
+        let selected = workspace.selected, origin = workspace.current; working = true
         Task {
             do {
-                for entry in selected { try await workspace.current.service.setMetadata([entry.url], tags: append ? Array(Set(entry.tags + tags)).sorted() : tags, locked: nil, permissions: nil) }
-                workspace.current.refresh(); dismiss()
+                for entry in selected { try await origin.service.setMetadata([entry.url], tags: append ? Array(Set(entry.tags + tags)).sorted() : tags, locked: nil, permissions: nil) }
+                origin.refresh(); dismiss()
             } catch { self.error = error.localizedDescription; working = false }
         }
     }
 }
-
 struct ConnectSheet: View {
     @ObservedObject var workspace: ExplorerWorkspace
     @State private var address = "smb://"
@@ -156,8 +163,8 @@ struct ConnectSheet: View {
         VStack(alignment: .leading, spacing: 20) {
             SheetHeading(title: "Connect to Server", subtitle: "Open a network share using macOS. Authentication is handled by the system; MacExplorer does not collect or store server passwords.")
             TextField("smb://server/share", text: $address).textFieldStyle(.roundedBorder).onSubmit(connect)
-            Text("Supported address routes: SMB, AFP, NFS, and HTTPS WebDAV. Actual mounting depends on macOS and the server.").font(.caption).foregroundStyle(.secondary)
-            HStack { Spacer(); Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction); Button("Connect", action: connect).buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction) }
+            Text("Supported address routes: SMB, AFP, NFS, and HTTPS WebDAV. Actual mounting depends on macOS and the server.").font(.caption).foregroundStyle(ExplorerDesign.muted)
+            HStack { Spacer(); Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction); Button("Connect", action: connect).buttonStyle(ExplorerButtonStyle(primary: true)).keyboardShortcut(.defaultAction) }
         }.padding(25).frame(width: 490)
     }
     private func connect() { dismiss(); NativeIntegration.connect(address, owner: workspace) }
