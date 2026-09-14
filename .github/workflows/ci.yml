@@ -1,0 +1,27 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native:
+    uses: ./.github/workflows/build.yml
+    with:
+      version: '0.1.0'
+  repository:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Check scripts and manifest generation
+        run: |
+          bash -n scripts/*.sh
+          python3 -m py_compile scripts/*.py
+          VERSION=0.1.0 python3 scripts/make-info.py /tmp/MacExplorer-Info.plist
+          python3 scripts/check-design.py

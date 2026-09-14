@@ -1,0 +1,146 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - id: version
+        env:
+          TAG: ${{ github.ref_name }}
+          PUBLIC_KEY: ${{ vars.SPARKLE_PUBLIC_KEY }}
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Expected vMAJOR.MINOR.PATCH'; exit 1; }
+          [[ -n "$PUBLIC_KEY" ]] || { echo 'Configure SPARKLE_PUBLIC_KEY before publishing a release.'; exit 1; }
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+  build:
+    needs: version
+    uses: ./.github/workflows/build.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+  sign:
+    if: ${{ vars.APPLE_SIGNING_ENABLED == 'true' }}
+    needs: [version, build]
+    runs-on: macos-15
+    environment: apple-signing
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require a release commit from main
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: MacExplorer-universal
+          path: dist
+      - name: Verify build before loading credentials
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          (cd dist && shasum -a 256 -c SHA256SUMS)
+          ditto -x -k "dist/MacExplorer-$VERSION-universal.zip" dist
+          bash scripts/verify-package.sh
+      - name: Import temporary signing credentials
+        env:
+          DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          DEVELOPER_ID_IDENTITY: ${{ secrets.DEVELOPER_ID_IDENTITY }}
+          APP_STORE_CONNECT_KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8 }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: bash scripts/setup-apple-signing.sh
+      - name: Sign and notarize the existing app
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          USE_PREBUILT_APP: '1'
+        run: bash scripts/package.sh
+      - name: Verify Apple notarization
+        env:
+          EXPECT_NOTARIZED: '1'
+        run: bash scripts/verify-package.sh
+      - name: Remove signing material
+        if: ${{ always() }}
+        run: bash scripts/cleanup-apple-signing.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: MacExplorer-notarized
+          path: |
+            dist/*.zip
+            dist/*.dmg
+            dist/SHA256SUMS
+            dist/INSTALL.md
+          if-no-files-found: error
+          retention-days: 30
+      - name: Preserve notarization diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: MacExplorer-notarization-diagnostics
+          path: dist/*notary*.json
+          if-no-files-found: ignore
+          retention-days: 7
+  publish:
+    needs: [version, build, sign]
+    if: >-
+      ${{ !cancelled() && needs.version.result == 'success' && needs.build.result == 'success' &&
+          (needs.sign.result == 'success' || (needs.sign.result == 'skipped' && vars.APPLE_SIGNING_ENABLED != 'true')) }}
+    runs-on: macos-15
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require a main-branch release commit
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ needs.sign.result == 'success' && 'MacExplorer-notarized' || 'MacExplorer-universal' }}
+          path: release/dist
+      - name: Prepare verification tools before loading update key
+        run: |
+          (cd release/dist && shasum -a 256 -c SHA256SUMS)
+          swift package resolve
+          mkdir -p .build/release-tools
+          swiftc scripts/verify-signature.swift -o .build/release-tools/verify-signature
+      - name: Create and independently verify signed update feed
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: bash scripts/generate-appcast.sh release/dist
+      - name: Assemble source and design downloads
+        run: |
+          git archive --format=zip --prefix=MacExplorer/ --output=release/dist/MacExplorer-source.zip HEAD
+          (cd Design && zip -q -r ../release/dist/MacExplorer-design.zip .)
+          (cd release/dist && shasum -a 256 *.zip *.dmg appcast.xml > SHA256SUMS)
+      - name: Publish complete release atomically from a draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          NOTARIZED: ${{ needs.sign.result == 'success' }}
+        run: |
+          cp .github/RELEASE_NOTES.md "$RUNNER_TEMP/release-notes.md"
+          if [[ "$NOTARIZED" == true ]]; then
+            printf '\nDeveloper ID-signed and Apple notarized.\n' >> "$RUNNER_TEMP/release-notes.md"
+          else
+            printf '\nAd-hoc signed, not Apple notarized. This is not a notarized production distribution.\n' >> "$RUNNER_TEMP/release-notes.md"
+          fi
+          if DRAFT="$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null)"; then
+            [[ "$DRAFT" == true ]] || { echo 'Version is already published. Use a new version.'; exit 1; }
+          else
+            gh release create "$TAG" --verify-tag --draft --title "MacExplorer ${TAG#v}" --notes-file "$RUNNER_TEMP/release-notes.md"
+          fi
+          gh release upload "$TAG" release/dist/*.zip release/dist/*.dmg release/dist/appcast.xml release/dist/SHA256SUMS release/dist/INSTALL.md --clobber
+          gh release edit "$TAG" --draft=false --notes-file "$RUNNER_TEMP/release-notes.md"
