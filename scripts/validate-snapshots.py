@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate native coverage, dimensions and compositing; build an offline gallery."""
+"""Validate production SwiftUI captures and build an offline review gallery."""
 import argparse
 import hashlib
 import html
@@ -9,19 +9,25 @@ import struct
 
 
 def validate(root: pathlib.Path) -> dict:
-    captures = json.loads((root / 'captures.json').read_text())
-    captures += json.loads((root / 'archive-captures.json').read_text())
+    captures = []
+    for manifest in ('captures.json', 'archive-captures.json', 'design-captures.json'):
+        captures += json.loads((root / manifest).read_text())
     expected = {'extra-large-icons', 'large-icons', 'medium-icons', 'small-icons',
                 'list', 'details', 'tiles', 'content', 'gallery', 'grouped-selection',
                 'panes-800', 'panes-1024', 'panes-1600', 'empty', 'permission-denied',
                 'dialog-newFolder', 'dialog-newFile', 'dialog-rename', 'dialog-tags',
-                'dialog-connect', 'transfers', 'preferences', 'archive-browser'}
+                'dialog-connect', 'transfers', 'preferences', 'archive-browser',
+                'reference-home', 'reference-details', 'reference-computer'}
     required = {f'{theme}-{case}' for theme in ('light', 'dark') for case in expected}
     names = [item['name'] for item in captures]
     if len(set(names)) != len(names) or set(names) != required:
         raise ValueError(f'Coverage mismatch. Missing: {sorted(required - set(names))}; unexpected: {sorted(set(names) - required)}')
+    assertions = json.loads((root / 'design-assertions.json').read_text())
+    if {item['capture'] for item in assertions} != {f'{theme}-reference-{view}' for theme in ('light', 'dark') for view in ('home', 'details', 'computer')}:
+        raise ValueError('Missing populated design assertion evidence')
     checksums = {}
     cards = []
+    captures.sort(key=lambda item: (0 if '-reference-' in item['name'] else 1, item['name']))
     for item in captures:
         name = item['name']
         data = (root / (name + '.png')).read_bytes()
@@ -40,9 +46,10 @@ def validate(root: pathlib.Path) -> dict:
         checksums[name + '.png'] = hashlib.sha256(data).hexdigest()
         label = html.escape(name)
         cards.append(f'<article><h2>{label}</h2><a href="{label}.png"><img loading="lazy" src="{label}.png" alt="Native {label} capture" width="{width}" height="{height}"></a></article>')
-    page = '''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>MacExplorer native visual review</title><style>body{font:14px system-ui;margin:32px;background:#17191d;color:#eef0f4}header{max-width:900px;margin-bottom:30px}main{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(500px,100%),1fr));gap:24px}article{min-width:0}h2{font-size:14px}img{width:100%;height:auto;border:1px solid #454951;border-radius:10px}a{color:inherit}</style><header><h1>MacExplorer · native visual review</h1><p>Production SwiftUI views rendered by macOS AppKit. Fixed fixture data, light/dark themes and responsive widths. Click a capture for full resolution. This report checks coverage, dimensions, compositing and nonblank rendering; it is not a pixel-baseline or accessibility certification.</p></header><main>'''
+    page = '''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>MacExplorer native visual review</title><style>body{font:14px system-ui;margin:32px;background:#17191d;color:#eef0f4}header{max-width:920px;margin-bottom:30px}main{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(580px,100%),1fr));gap:24px}article{min-width:0}h2{font-size:14px}img{width:100%;height:auto;border:1px solid #454951;border-radius:10px}a{color:inherit}</style><header><h1>MacExplorer · native design review</h1><p>Production SwiftUI views rendered by AppKit. The populated reference views come first; click for full resolution. CI checks the design's default pane/chrome proportions, sampled surface and selection colors, no empty zebra rows, bitmap coverage, dimensions and compositing. These checks do not replace review of typography, interactions, or assistive technologies.</p></header><main>'''
     (root / 'index.html').write_text(page + ''.join(cards) + '</main></html>')
-    report = {'schemaVersion': 1, 'captures': len(captures), 'sha256': checksums, 'checks': ['coverage', 'PNG dimensions', 'nonblank rendering', 'opaque compositing']}
+    report = {'schemaVersion': 2, 'captures': len(captures), 'sha256': checksums,
+              'checks': ['coverage', 'PNG dimensions', 'nonblank rendering', 'opaque compositing', 'reference pane/chrome geometry', 'reference palette', 'selected-row palette', 'empty canvas palette']}
     (root / 'validation.json').write_text(json.dumps(report, indent=2) + '\n')
     return report
 

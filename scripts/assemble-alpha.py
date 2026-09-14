@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Assemble an exact-commit alpha from verified build and native-view artifacts.
-
-No code in downloaded artifacts is executed. A visual report is accepted only
-when its commit and every recorded PNG digest match the successful CI snapshot.
-"""
+"""Assemble exact-commit alphas from verified native packages and design evidence."""
 from __future__ import annotations
 import argparse
 import hashlib
@@ -24,12 +20,16 @@ def validate_views(root: pathlib.Path, commit: str) -> dict:
     if (root / 'COMMIT.txt').read_text().strip() != commit:
         raise ValueError(f'Native-view artifact is from another commit: {root}')
     report = json.loads((root / 'validation.json').read_text())
-    captures = json.loads((root / 'captures.json').read_text())
-    captures += json.loads((root / 'archive-captures.json').read_text())
+    captures = []
+    for name in ('captures.json', 'archive-captures.json', 'design-captures.json'):
+        captures += json.loads((root / name).read_text())
     hashes = report.get('sha256', {})
     expected = {item['name'] + '.png' for item in captures}
-    if not expected or len(expected) != len(captures) or set(hashes) != expected or report['captures'] != len(captures):
+    if len(expected) != 52 or len(expected) != len(captures) or set(hashes) != expected or report['captures'] != len(captures):
         raise ValueError(f'Incomplete visual report: {root}')
+    assertions = json.loads((root / 'design-assertions.json').read_text())
+    if len(assertions) != 6 or report.get('schemaVersion') != 2:
+        raise ValueError('Missing native reference-design assertions')
     for name, checksum in hashes.items():
         if pathlib.PurePosixPath(name).name != name or not name.endswith('.png'):
             raise ValueError('Unsafe artifact entry')
@@ -90,7 +90,7 @@ def assemble(native: pathlib.Path, views: pathlib.Path, output: pathlib.Path, co
     pathlib.Path('alpha-notes.md').write_text(
         f'# MacExplorer alpha {number}\n\nSource: `{commit}`. [Successful native CI]({build}).\n\n'
         '**Development build: ad-hoc signed, not Apple notarized. Read `INSTALL.md` before opening.**\n\n'
-        'The native ZIP/DMG, source, interactive design and both native screenshot galleries match this exact commit. '
+        'The native ZIP/DMG, source, interactive design and both 52-view native screenshot galleries match this exact commit. '
         '`manifest.json` records toolchains, view coverage and SHA-256 checksums. '
         'Native UI checks are not a claim of complete Explorer parity or an accessibility certification.\n\n'
         'This alpha does not modify the signed production Sparkle feed or the stable latest release.\n\n' + notes)
