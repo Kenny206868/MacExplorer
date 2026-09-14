@@ -17,15 +17,18 @@ import QuartzCore
         window.backgroundColor = .windowBackgroundColor; window.contentView = host
         host.frame = NSRect(origin: .zero, size: size); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
         defer { window.orderOut(nil); window.contentView = nil; window.close() }
+        host.layoutSubtreeIfNeeded()
         try await Task.sleep(for: .milliseconds(450))
+        host.layoutSubtreeIfNeeded(); host.displayIfNeeded(); CATransaction.flush()
+        // Lazy rows may create their native field editors during the explicit
+        // layout above. Drain their normal focus tasks before asserting state;
+        // the renderer never changes the first responder on their behalf.
+        try await Task.sleep(for: .milliseconds(80))
         host.layoutSubtreeIfNeeded(); host.displayIfNeeded(); CATransaction.flush()
         XCTAssertEqual(host.bounds.width, size.width, accuracy: 1, "Horizontal overflow: \(name)")
         XCTAssertEqual(host.bounds.height, size.height, accuracy: 1, "Vertical overflow: \(name)")
-        try verify?(window)
         let raw = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds), "No bitmap: \(name)")
         host.cacheDisplay(in: host.bounds, to: raw)
-        // Explicit sRGB avoids interpreting untagged DeviceRGB through a generic
-        // monitor profile; composite native material layers exactly once.
         let colorSpace = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
         let context = try XCTUnwrap(CGContext(data: nil, width: raw.pixelsWide, height: raw.pixelsHigh,
             bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
@@ -35,6 +38,8 @@ import QuartzCore
         let bitmap = NSBitmapImageRep(cgImage: try XCTUnwrap(context.makeImage()))
         let data = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
         try data.write(to: output.appendingPathComponent(name + ".png"), options: .atomic)
+        // Preserve the failed image as evidence when a state assertion throws.
+        try verify?(window)
         var shades = Set<Int>(), low = 1.0, high = 0.0, minimumAlpha = 1.0
         for y in stride(from: 0, to: bitmap.pixelsHigh, by: 7) {
             for x in stride(from: 0, to: bitmap.pixelsWide, by: 7) {

@@ -34,7 +34,7 @@ struct WorkspaceShell: View {
                         VStack(spacing: 0) {
                             Picker("Auxiliary pane", selection: $compactPane) {
                                 Text("Details").tag("Details"); Text("Preview").tag("Preview")
-                            }.pickerStyle(.segmented).padding(12)
+                            }.labelsHidden().pickerStyle(.segmented).padding(12)
                             ExplorerRule()
                             if compactPane == "Preview" { preview } else { ExplorerInspector(workspace: workspace, tab: tab) }
                         }.frame(width: panes.auxiliary).explorerRegion("auxiliary")

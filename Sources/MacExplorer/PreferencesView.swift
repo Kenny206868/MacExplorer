@@ -33,7 +33,7 @@ struct PreferencesView: View {
     init(initialPage: SettingsPage = .general) { _page = State(initialValue: initialPage) }
     var body: some View {
         HStack(spacing: 0) {
-            sidebar.frame(width: 158)
+            sidebar.frame(width: 180)
             Rectangle().fill(ExplorerDesign.separator).frame(width: 1)
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 7) {
@@ -53,7 +53,7 @@ struct PreferencesView: View {
                     }.padding(22).frame(maxWidth: .infinity, alignment: .leading)
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity).background(ExplorerDesign.canvas)
-        }.foregroundStyle(ExplorerDesign.text).frame(width: 660, height: 535)
+        }.foregroundStyle(ExplorerDesign.text).frame(width: 682, height: 535)
             .sheet(isPresented: $help) { KeyboardHelpView() }
             .alert("MacExplorer Settings", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) { Button("OK") { error = nil } } message: { Text(error ?? "") }
             .confirmationDialog(confirmation ?? "Confirm", isPresented: Binding(get: { confirmation != nil }, set: { if !$0 { confirmation = nil } }), titleVisibility: .visible) {
@@ -169,6 +169,10 @@ struct PreferencesView: View {
             if !integrationStatus.isEmpty { Label(integrationStatus, systemImage: "checkmark.circle").font(.system(size: 11)).foregroundStyle(.green) }
         }
     }
+    private var installedVersion: String {
+        guard Bundle.main.bundleURL.pathExtension == "app" else { return "Development build" }
+        return Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development build"
+    }
     private var updates: some View {
         Group {
             SettingsCard("INSTALLED BUILD") {
@@ -176,7 +180,7 @@ struct PreferencesView: View {
                     Image(systemName: "folder.badge.gearshape").font(.system(size: 36)).foregroundStyle(Color.accentColor)
                     VStack(alignment: .leading, spacing: 5) {
                         Text("MacExplorer").font(.system(size: 17, weight: .semibold))
-                        Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development build").foregroundStyle(ExplorerDesign.muted)
+                        Text(installedVersion).foregroundStyle(ExplorerDesign.muted)
                     }
                 }.padding(.vertical, 8)
             }
