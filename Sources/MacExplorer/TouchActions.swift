@@ -35,12 +35,7 @@ struct FileActionSheet: View {
         Button {
             do {
                 let snapshot = try FileActionSnapshot(workspace)
-                workspace.sheet = nil
-                Task { @MainActor in
-                    do { try await Task.sleep(for: .milliseconds(250)); try snapshot.validate(); perform() }
-                    catch is CancellationError { }
-                    catch { workspace.fail("File action stopped", error.localizedDescription) }
-                }
+                DeferredSheetAction.shared.enqueue(for: workspace, validate: snapshot.validate) { _ in perform() }
             } catch { workspace.sheet = nil; workspace.fail("File action unavailable", error.localizedDescription) }
         } label: { Label(title, systemImage: symbol).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading) }.buttonStyle(ExplorerButtonStyle())
     }
@@ -48,6 +43,7 @@ struct FileActionSheet: View {
 struct KeyboardHelpView: View {
     @Environment(\.dismiss) private var dismiss
     private let shortcuts: [(String, String)] = [
+        ("Cmd/Ctrl + Shift + P", "Search and run commands"),
         ("Cmd/Ctrl + Shift + D", "Toggle dual-pane browsing"),
         ("Tab / Shift + Tab", "Switch between file panes"),
         ("Cmd + Option + C", "Copy selected files to the other pane"),
@@ -86,7 +82,7 @@ struct KeyboardHelpView: View {
                         HStack(alignment: .top) {
                             Text(key).font(.system(size: 11, weight: .medium, design: .monospaced)).frame(width: 220, alignment: .leading)
                             Text(action).font(.system(size: 12)).frame(maxWidth: .infinity, alignment: .leading)
-                        }.padding(.vertical, 10).overlay(alignment: .bottom) { ExplorerRule().opacity(0.5) }
+                        }.padding(.vertical, 10).overlay(alignment: .bottom) { ExplorerRule() }
                     }
                 }
             }

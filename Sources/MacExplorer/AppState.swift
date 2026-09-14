@@ -77,9 +77,7 @@ struct ConflictPrompt: Identifiable {
     var runningCount: Int { jobs.filter { !$0.finished }.count }
     func submit(_ job: FileJob, owner: ExplorerWorkspace, cutTicket: FileClipboard.CutTicket? = nil, completion: ((FileJobResult) -> Void)? = nil) {
         let origin = owner.current, location = owner.current.location
-        let row = OperationRow(id: job.id, title: job.title), control = OperationControl()
-        // Keep the row's cooperative control as the sole operation control.
-        _ = control
+        let row = OperationRow(id: job.id, title: job.title)
         jobs.insert(row, at: 0)
         let jobControl = row.control
         row.cancellationAction = { [weak owner] in if owner?.conflict?.operationID == job.id { owner?.answerCollision(.cancel) } }
@@ -133,4 +131,3 @@ struct ConflictPrompt: Identifiable {
     }
 }
 struct MessageBox: Identifiable { let id = UUID(); let title: String; let message: String }
-enum ExplorerSheet: String, Identifiable { case newFolder, newFile, rename, properties, tags, connect, operations, recovery, archive, fileActions, keyboardHelp; var id: String { rawValue } }

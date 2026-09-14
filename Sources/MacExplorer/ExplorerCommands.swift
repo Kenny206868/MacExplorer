@@ -25,6 +25,7 @@ struct ExplorerCommands: Commands {
         CommandGroup(after: .toolbar) { viewItems }
         CommandGroup(after: .windowArrangement) { windowItems }
         CommandGroup(replacing: .help) {
+            Button("Search Commands…") { target?.sheet = .commandPalette }.keyboardShortcut("p", modifiers: [.command, .shift]).disabled(target == nil)
             Button("Keyboard & Gestures…") { target?.sheet = .keyboardHelp }.disabled(target == nil)
             Link("MacExplorer User Guide", destination: URL(string: "https://github.com/wieslawsoltes/MacExplorer/blob/main/docs/USER-GUIDE.md")!)
             Link("Report an Issue", destination: URL(string: "https://github.com/wieslawsoltes/MacExplorer/issues")!)

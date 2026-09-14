@@ -32,6 +32,8 @@ struct ExplorerWindow: View {
                 if let window = notification.object as? NSWindow, window == workspace.window { WorkspaceSessionCoordinator.shared.close(workspace) }
             }
             .onDisappear {
+                DeferredSheetAction.shared.cancel(for: workspace)
+                if let second = workspace.dualPane?.secondary { DeferredSheetAction.shared.cancel(for: second) }
                 workspace.answerCollision(.cancel); workspace.dualPane?.secondary.answerCollision(.cancel)
                 workspace.saveSession(); workspace.tabs.forEach { $0.stop() }; workspace.dualPane?.secondary.tabs.forEach { $0.stop() }
             }
@@ -58,7 +60,7 @@ struct ExplorerWindow: View {
 private struct WorkspaceDialogs: ViewModifier {
     @ObservedObject var workspace: ExplorerWorkspace
     func body(content: Content) -> some View {
-        content.sheet(item: $workspace.sheet) { sheet in ExplorerSheetView(sheet: sheet, workspace: workspace) }
+        content.sheet(item: $workspace.sheet, onDismiss: { DeferredSheetAction.shared.didDismiss(workspace) }) { sheet in ExplorerSheetView(sheet: sheet, workspace: workspace) }
             .sheet(item: $workspace.conflict) { prompt in CollisionView(prompt: prompt, workspace: workspace).interactiveDismissDisabled() }
             .alert(item: $workspace.message) { message in Alert(title: Text(message.title), message: Text(message.message), dismissButton: .default(Text("OK"))) }
             .confirmationDialog(workspace.permanentDeletion ? "Permanently delete \(workspace.pendingDeletion.count) item(s)?" : "Move \(workspace.pendingDeletion.count) item(s) to Trash?", isPresented: Binding(get: { !workspace.pendingDeletion.isEmpty }, set: { if !$0 { workspace.pendingDeletion = [] } }), titleVisibility: .visible) {

@@ -14,6 +14,10 @@ extension Notification.Name { static let explorerNewWindow = Notification.Name("
         if control && !command && event.keyCode == 48 { workspace.cycleTab(shift ? -1 : 1); return nil }
         if control && !command && (event.keyCode == 116 || event.keyCode == 121) { workspace.cycleTab(event.keyCode == 116 ? -1 : 1); return nil }
         if event.keyCode == 97 && !command && !control && !option { workspace.cycleFocus(backwards: shift); return nil }
+        if (command || control) && shift && !option && text == "p" {
+            if let editor = event.window?.firstResponder as? NSTextView, editor.hasMarkedText() { return event }
+            workspace.sheet = .commandPalette; return nil
+        }
         let editing = event.window?.firstResponder is NSTextView || event.window?.firstResponder is NSTextField
         if editing {
             if event.keyCode == 53 && (workspace.addressFocused || workspace.searchFocused) {
