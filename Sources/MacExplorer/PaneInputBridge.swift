@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import ExplorerCore
 
+/// Native input regions are transparent to ordinary SwiftUI hit testing.
 struct PaneInputBridge: NSViewRepresentable {
     let workspace: ExplorerWorkspace
     func makeNSView(context: Context) -> PaneInputRegion {
@@ -14,6 +15,7 @@ struct PaneInputBridge: NSViewRepresentable {
     weak var workspace: ExplorerWorkspace?
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override var isFlipped: Bool { true }
+    override func layout() { super.layout(); workspace?.fileViewportHeight = max(1, bounds.height) }
 }
 @MainActor final class PaneInputRouter {
     static let shared = PaneInputRouter()
@@ -24,7 +26,9 @@ struct PaneInputBridge: NSViewRepresentable {
     func register(_ view: PaneInputRegion) {
         regions.add(view); guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .swipe, .magnify, .smartMagnify, .pressure]) { [weak self] event in
-            MainActor.assumeIsolated { guard let self else { return event }; return self.handle(event) }
+            guard let self else { return event }
+            let consumed = MainActor.assumeIsolated { self.handle(event) == nil }
+            return consumed ? nil : event
         }
     }
     func unregister(_ view: PaneInputRegion) {
@@ -44,7 +48,9 @@ struct PaneInputBridge: NSViewRepresentable {
         }
         guard workspace.sheet == nil, workspace.conflict == nil, workspace.message == nil, workspace.windowRoot.pendingPaneTransfer == nil else { return event }
         if [.leftMouseDown, .rightMouseDown, .otherMouseDown].contains(event.type) {
+            let wasEditingLocation = workspace.addressFocused || workspace.searchFocused
             workspace.activatePane(); workspace.fileSurfaceFocused = true
+            if event.type == .leftMouseDown && wasEditingLocation { workspace.focusFileSurface() }
             if event.type == .otherMouseDown && (event.buttonNumber == 3 || event.buttonNumber == 4) {
                 if event.buttonNumber == 3 { workspace.current.back() } else { workspace.current.forward() }; return nil
             }

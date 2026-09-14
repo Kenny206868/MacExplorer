@@ -94,7 +94,7 @@ struct DualPaneShell: View {
                 Button("Swap Locations") { controller.swapLocations() }
                 Button("Same Location in Other Pane") { controller.copyLocation(from: workspace) }
                 Divider(); Button("Close Dual Panes") { workspace.toggleDualPane() }
-            } label: { Image(systemName: "rectangle.split.2x1").frame(width: 26) }.menuStyle(.borderlessButton).menuIndicator(.hidden).help("Pane layout")
+            } label: { Image(systemName: "rectangle.split.2x1").frame(width: input.target, height: input.target) }.menuStyle(.borderlessButton).menuIndicator(.hidden).help("Pane layout")
             Spacer(minLength: 0)
             if hidesAuxiliary && (preferences.value.inspector || preferences.value.previewPane) {
                 Image(systemName: "sidebar.right").foregroundStyle(ExplorerDesign.muted).help("Auxiliary panes are preserved and appear when the window is at least 1540 points wide.")
@@ -127,7 +127,6 @@ private struct DualFilePane: View {
                         ContentUnavailableView("Location unavailable", systemImage: "folder.badge.questionmark", description: Text(error))
                     } else { ExplorerContent(workspace: workspace, tab: workspace.current) }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity).background(ExplorerDesign.canvas)
-                    .background(PaneInputBridge(workspace: workspace))
                     .onDrop(of: ["public.file-url"], isTargeted: nil) { providers in
                         guard let destination = workspace.destination else { return false }
                         return workspace.drop(providers, to: destination, move: NSEvent.modifierFlags.contains(.shift))
@@ -165,7 +164,7 @@ private struct DualFilePane: View {
                 Button("Focus This Pane") { controller.focus(side, files: true) }
                 Button("Edit Location") { controller.focus(side); workspace.addressFocused = true }
                 Button("Search This Pane") { controller.focus(side); workspace.searchFocused = true }
-                Picker("View", selection: $workspace.current.options.view) { ForEach(ViewMode.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
+                Picker("View", selection: Binding(get: { workspace.current.options.view }, set: { workspace.current.options.view = $0 })) { ForEach(ViewMode.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
                 Button("Refresh") { workspace.current.refresh() }
             } label: { Image(systemName: "ellipsis").frame(width: input.target, height: input.target) }.menuStyle(.borderlessButton).menuIndicator(.hidden).accessibilityLabel("Pane actions")
         }.font(.system(size: 12)).padding(.horizontal, 10).frame(height: input.touchFriendly ? 54 : 44)

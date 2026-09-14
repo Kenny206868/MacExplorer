@@ -5,7 +5,14 @@ import ExplorerCore
 struct ExplorerContent: View {
     @ObservedObject var workspace: ExplorerWorkspace
     @ObservedObject var tab: BrowserTab
+    @ObservedObject private var input = InputPreferences.shared
     var body: some View {
+        VStack(spacing: 0) {
+            content.background(PaneInputBridge(workspace: workspace))
+            if input.touchFriendly && workspace.paneController == nil { TouchFileBar(workspace: workspace) }
+        }
+    }
+    private var content: some View {
         Group {
             if tab.query.isEmpty && tab.location == .home { HomeView(workspace: workspace, tab: tab) }
             else if tab.query.isEmpty && tab.location == .computer { ComputerView(workspace: workspace) }
@@ -26,6 +33,7 @@ struct HomeView: View {
     @ObservedObject var tab: BrowserTab
     @EnvironmentObject private var preferences: PreferenceStore
     @State private var showAllRecent = false
+    @ObservedObject private var input = InputPreferences.shared
     var body: some View {
         GeometryReader { geometry in
             ScrollView {
@@ -60,7 +68,7 @@ struct HomeView: View {
                             }.frame(maxWidth: .infinity).padding(.vertical, 40)
                         } else {
                             FileDetailsTable(workspace: workspace, tab: tab, embedded: true)
-                                .frame(height: 34 + CGFloat(showAllRecent ? min(tab.entries.count, 60) : min(tab.entries.count, 12)) * (preferences.value.compact ? 28 : 36))
+                                .frame(height: 34 + CGFloat(showAllRecent ? min(tab.entries.count, 60) : min(tab.entries.count, 12)) * input.rowHeight(compact: preferences.value.compact))
                         }
                     }
                 }.padding(26)
