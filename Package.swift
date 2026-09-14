@@ -7,7 +7,8 @@ let package = Package(
     products: [
         .executable(name: "MacExplorer", targets: ["MacExplorer"]),
         .library(name: "ExplorerCore", targets: ["ExplorerCore"]),
-        .executable(name: "RecoveryCrashProbe", targets: ["RecoveryCrashProbe"])
+        .executable(name: "RecoveryCrashProbe", targets: ["RecoveryCrashProbe"]),
+        .executable(name: "FileOperationCrashProbe", targets: ["FileOperationCrashProbe"])
     ],
     dependencies: [.package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.6")],
     targets: [
@@ -16,8 +17,9 @@ let package = Package(
         .target(name: "ExplorerJournal", dependencies: ["CJournal"]),
         .target(name: "ExplorerCore", dependencies: ["CLibArchive", "ExplorerJournal"], linkerSettings: [.linkedLibrary("archive")]),
         .executableTarget(name: "RecoveryCrashProbe", dependencies: ["ExplorerJournal"]),
+        .executableTarget(name: "FileOperationCrashProbe", dependencies: ["ExplorerCore", "ExplorerJournal"]),
         .executableTarget(name: "MacExplorer", dependencies: ["ExplorerCore", .product(name: "Sparkle", package: "Sparkle")], linkerSettings: [.linkedFramework("AppKit"), .linkedFramework("QuickLookThumbnailing"), .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]),
-        .testTarget(name: "ExplorerCoreTests", dependencies: ["ExplorerCore"]),
+        .testTarget(name: "ExplorerCoreTests", dependencies: ["ExplorerCore", "FileOperationCrashProbe"]),
         .testTarget(name: "ExplorerJournalTests", dependencies: ["ExplorerJournal", "RecoveryCrashProbe"]),
         .testTarget(name: "MacExplorerUITests", dependencies: ["MacExplorer", "ExplorerCore"])
     ]

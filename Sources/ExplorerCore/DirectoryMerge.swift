@@ -1,6 +1,6 @@
 import Foundation
 
-/// Packages are indivisible documents; symbolic links are objects, never traversal edges.
+/// Packages are indivisible documents; links are objects, never traversal edges.
 enum DirectoryMergeGuard {
     static func isPlainDirectory(_ url: URL) -> Bool {
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
@@ -16,9 +16,6 @@ enum DirectoryMergeGuard {
         return true
     }
 }
-
-/// Immutable ancestry stamps are shared instead of copying an array per child.
-/// Revalidation after each collision await detects replaced folders and links.
 private final class MergeAncestry: @unchecked Sendable {
     let source: URL
     let target: URL
@@ -26,9 +23,7 @@ private final class MergeAncestry: @unchecked Sendable {
     let targetIdentity: FileFingerprint
     let parent: MergeAncestry?
     init(source: URL, target: URL, parent: MergeAncestry?) throws {
-        guard DirectoryMergeGuard.canMerge(source, target) else {
-            throw ExplorerError.message("Only distinct, non-overlapping ordinary folders can be merged.")
-        }
+        guard DirectoryMergeGuard.canMerge(source, target) else { throw ExplorerError.message("Only distinct, non-overlapping ordinary folders can be merged.") }
         self.source = source; self.target = target; self.parent = parent
         sourceIdentity = try FileFingerprint(source); targetIdentity = try FileFingerprint(target)
     }
@@ -43,19 +38,15 @@ private final class MergeAncestry: @unchecked Sendable {
         }
     }
 }
-private enum MergeWork {
-    case visit(URL, URL, MergeAncestry)
-    case finish(MergeAncestry)
-}
+private enum MergeWork { case visit(URL, URL, MergeAncestry), finish(MergeAncestry) }
 
 extension FileOperationEngine {
-    /// The serialization gate is already held. Each child is a staged transfer,
-    /// not a whole-tree atomic transaction. Completed steps survive cancellation.
+    /// The gate is already held. Each child has its own durable receipt boundary,
+    /// so completed work survives cancellation or a later process crash.
     func mergeContents(_ job: FileJob, source: URL, target: URL, receipt: OperationReceipt,
                        control: OperationControl, reporter: TransferProgressReporter,
                        resolve: @Sendable (FileCollision) async -> CollisionAnswer) async -> FileJobResult {
-        var result = FileJobResult(title: job.title)
-        result.receipt = receipt
+        var result = FileJobResult(title: job.title); result.receipt = receipt
         let manager = FileManager.default
         var changed = false, skipped = false
         var leafPolicy: CollisionChoice?
@@ -63,50 +54,36 @@ extension FileOperationEngine {
             guard job.kind == .copy || job.kind == .move else { throw ExplorerError.message("This operation does not support folder merging.") }
             try guardSource(source)
             let root = try MergeAncestry(source: source, target: target, parent: nil)
-            let recoveryParent = source.deletingLastPathComponent()
-            let recoveryParentIdentity = try FileFingerprint(recoveryParent)
+            let recoveryParent = source.deletingLastPathComponent(), recoveryParentIdentity = try FileFingerprint(source.deletingLastPathComponent())
             var work: [MergeWork] = [.finish(root)]
             func children(_ folder: MergeAncestry) throws -> [MergeWork] {
                 try folder.validate()
                 return try manager.contentsOfDirectory(at: folder.source, includingPropertiesForKeys: nil)
-                    .sorted { $0.lastPathComponent < $1.lastPathComponent }
-                    .reversed().map { .visit($0, folder.target.appendingPathComponent($0.lastPathComponent), folder) }
+                    .sorted { $0.lastPathComponent < $1.lastPathComponent }.reversed()
+                    .map { .visit($0, folder.target.appendingPathComponent($0.lastPathComponent), folder) }
             }
             work.append(contentsOf: try children(root))
             while let next = work.popLast() {
                 try control.checkpoint()
                 switch next {
                 case .visit(let child, var destination, let ancestry):
-                    try ancestry.validate()
-                    try FileNames.validate(child.lastPathComponent)
-                    try guardSource(child)
+                    try ancestry.validate(); try FileNames.validate(child.lastPathComponent); try guardSource(child)
                     if DirectoryMergeGuard.canMerge(child, destination) {
                         let nested = try MergeAncestry(source: child, target: destination, parent: ancestry)
-                        work.append(.finish(nested)); work.append(contentsOf: try children(nested))
-                        continue
+                        work.append(.finish(nested)); work.append(contentsOf: try children(nested)); continue
                     }
                     reporter.begin(name: child.lastPathComponent, copying: job.kind == .copy)
                     var replace = false
                     if FileNames.exists(destination) {
-                        let sourceBefore = try FileFingerprint(child)
-                        let targetBefore = try FileFingerprint(destination)
+                        let sourceBefore = try FileFingerprint(child), targetBefore = try FileFingerprint(destination)
                         let answer: CollisionAnswer
                         if let leafPolicy { answer = CollisionAnswer(leafPolicy) }
-                        else {
-                            reporter.phase(.waiting, name: child.lastPathComponent)
-                            answer = await resolve(FileCollision(source: child, destination: destination))
-                        }
-                        try control.checkpoint()
-                        try ancestry.validate()
-                        guard sourceBefore.matches(child), targetBefore.matches(destination) else {
-                            throw ExplorerError.message("An item changed while the merge decision was open. No replacement was performed.")
-                        }
+                        else { reporter.phase(.waiting, name: child.lastPathComponent); answer = await resolve(FileCollision(source: child, destination: destination)) }
+                        try control.checkpoint(); try ancestry.validate()
+                        guard sourceBefore.matches(child), targetBefore.matches(destination) else { throw ExplorerError.message("An item changed while the merge decision was open. No replacement was performed.") }
                         switch answer.choice {
                         case .cancel: control.cancel(); throw CancellationError()
-                        case .skip:
-                            skipped = true
-                            if answer.applyToAll { leafPolicy = .skip }
-                            continue
+                        case .skip: skipped = true; if answer.applyToAll { leafPolicy = .skip }; continue
                         case .keepBoth: destination = FileNames.unique(destination)
                         case .replace: replace = true
                         case .merge: throw ExplorerError.message("Packages, links, and files cannot be merged as folders.")
@@ -114,35 +91,26 @@ extension FileOperationEngine {
                         if answer.applyToAll { leafPolicy = answer.choice }
                     }
                     reporter.phase(job.kind == .copy ? .copying : .processing, name: child.lastPathComponent)
-                    let steps = try transfer(job, source: child, target: destination, replace: replace, control: control, reporter: reporter)
-                    result.receipt.steps.insert(contentsOf: steps, at: 0)
-                    changed = true; reporter.commitChild()
-                    try record(result.receipt)
+                    let steps = try transfer(job, source: child, target: destination, replace: replace, control: control, reporter: reporter, sourceRecoveryDirectory: recoveryParent)
+                    var updated = result.receipt; updated.steps.insert(contentsOf: steps, at: 0)
+                    try record(updated); result.receipt = updated; changed = true; reporter.commitChild()
                 case .finish(let ancestry):
                     try ancestry.validate()
                     if job.kind == .move {
-                        // A skipped child or newly arrived file keeps the container.
-                        // Empty originals are retained outside the source tree.
                         guard try manager.contentsOfDirectory(atPath: ancestry.source.path).isEmpty else { skipped = true; continue }
-                        guard recoveryParentIdentity.matchesIdentity(recoveryParent) else {
-                            throw ExplorerError.message("The source's parent changed during merging. The empty source folder was retained.")
-                        }
+                        guard recoveryParentIdentity.matchesIdentity(recoveryParent) else { throw ExplorerError.message("The source's parent changed during merging. The empty source folder was retained.") }
                         let backup = recoveryParent.appendingPathComponent(".MacExplorer-merged-directory-" + UUID().uuidString)
-                        try manager.moveItem(at: ancestry.source, to: backup)
-                        do {
-                            result.receipt.steps.insert(try UndoStep(.move, source: backup, destination: ancestry.source, emptyDirectory: true), at: 0)
-                        } catch {
-                            if !FileNames.exists(ancestry.source) { try? manager.moveItem(at: backup, to: ancestry.source) }
-                            throw ExplorerError.message("Could not record a merged source container. Recovery path: \(backup.path). \(error.localizedDescription)")
-                        }
-                        changed = true
-                        try record(result.receipt)
+                        try moveDurably(ancestry.source, to: backup, emptyDirectory: true)
+                        var updated = result.receipt
+                        updated.steps.insert(try UndoStep(.move, source: backup, destination: ancestry.source, emptyDirectory: true), at: 0)
+                        try record(updated); result.receipt = updated; changed = true
                     }
                 }
             }
             if !skipped { result.completedSources = [source] }
         } catch is CancellationError { result.cancelled = true }
         catch { result.errors.append("\(source.lastPathComponent): \(error.localizedDescription)") }
+        if result.cancelled || !result.errors.isEmpty { _ = rollbackJournal(into: &result) }
         if skipped { result.skippedSources = [source] }
         if changed || !result.completedSources.isEmpty { result.outputs = [target] }
         return result
