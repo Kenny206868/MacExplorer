@@ -400,8 +400,18 @@ public actor FileOperationEngine {
         return result
     }
     /// Two-phase batch rename supports swaps and case-only renames without overwriting siblings.
-    public func rename(_ mapping: [(URL, String)], control: OperationControl) async -> FileJobResult {
+    public func rename(_ mapping: [(URL, String)], control: OperationControl,
+                       expected: [String: FileFingerprint] = [:]) async -> FileJobResult {
         await acquire(); defer { release() }
+        // Validate after acquiring the cross-window serialization gate, not when
+        // an editor first queues its work. A replaced source must not be renamed.
+        for (source, _) in mapping {
+            if let fingerprint = expected[source.standardizedFileURL.path], !fingerprint.matches(source) {
+                var result = FileJobResult(title: "Rename")
+                result.errors = ["\(source.lastPathComponent) changed while its name was being edited. No rename was performed."]
+                return result
+            }
+        }
         return performRename(mapping, control: control)
     }
     private func performRename(_ mapping: [(URL, String)], control: OperationControl) -> FileJobResult {
