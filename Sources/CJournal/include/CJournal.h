@@ -18,4 +18,6 @@ int me_rename_exclusive(int, const char *, int, const char *);
 int me_sync_directory(int);
 int me_sync_path(const char *);
 uint32_t me_current_uid(void);
+char *me_realpath(const char *);
+void me_free(void *);
 #endif

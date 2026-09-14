@@ -18,8 +18,8 @@ enum SQLValue {
     var integer: Int64? { if case .integer(let n) = self { return n }; return nil }
     var data: Data? { if case .blob(let d) = self { return d }; return nil }
 }
-/// All data uses bound parameters. SQLite supplies crash-consistent WAL framing,
-/// checksums, recovery and synchronous commit ordering rather than custom logs.
+/// SQLite supplies WAL framing, checksums, recovery and synchronous commit
+/// ordering. Values are always bound rather than interpolated into SQL.
 final class JournalDatabase: @unchecked Sendable {
     private var handle: OpaquePointer?
     private let lock = NSRecursiveLock()
@@ -32,27 +32,27 @@ final class JournalDatabase: @unchecked Sendable {
         guard identity.isDirectory, identity.owner == me_current_uid(), identity.mode & 0o077 == 0 else {
             throw JournalError.unsafe("The journal directory must be owned by this user with mode 0700.")
         }
-        // SQLite NOFOLLOW rejects all symbolic path components, including the
-        // macOS /var alias. Validate the leaf, then resolve the parent spelling.
-        let canonical = directory.resolvingSymlinksInPath().standardizedFileURL
-        guard identity.matches(canonical, exact: false) else {
-            throw JournalError.unsafe("The journal directory changed while resolving its path.")
-        }
+        // Foundation may shorten /private/var to /var for display. SQLite
+        // NOFOLLOW needs the literal POSIX-canonical string, not a display URL.
+        guard let resolved = me_realpath(directory.path) else { throw JournalError.io("Resolve recovery directory", errno) }
+        let canonicalPath = String(cString: resolved); me_free(resolved)
+        let canonical = URL(fileURLWithPath: canonicalPath, isDirectory: true)
+        guard identity.matches(canonical, exact: false) else { throw JournalError.unsafe("The journal directory changed while resolving its path.") }
         self.directory = canonical
-        processLock = me_open_journal_lock(canonical.appendingPathComponent("writer.lock").path)
+        processLock = me_open_journal_lock(canonicalPath + "/writer.lock")
         guard processLock >= 0 else { throw JournalError.io("Acquire exclusive recovery writer lock", errno) }
-        let database = canonical.appendingPathComponent("operations.sqlite3")
+        let databasePath = canonicalPath + "/operations.sqlite3"
         for suffix in ["", "-wal", "-shm"] {
-            let path = URL(fileURLWithPath: database.path + suffix)
+            let path = URL(fileURLWithPath: databasePath + suffix)
             if let item = try? JournalIdentity(path) {
                 guard item.isRegularFile, item.owner == me_current_uid() else {
                     closeResources(); throw JournalError.unsafe("A database path is not an owned regular file.")
                 }
             }
         }
-        let status = sqlite3_open_v2(database.path, &handle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX | SQLITE_OPEN_NOFOLLOW, nil)
+        let status = sqlite3_open_v2(databasePath, &handle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX | SQLITE_OPEN_NOFOLLOW, nil)
         guard status == SQLITE_OK else {
-            let message = handle.map { String(cString: sqlite3_errmsg($0)) } ?? "Cannot open database"
+            let message = (handle.map { String(cString: sqlite3_errmsg($0)) } ?? "Cannot open database") + " (SQLite \(status), system \(handle.map { sqlite3_system_errno($0) } ?? 0))"
             closeResources(); throw JournalError.database(message)
         }
         do {
@@ -63,18 +63,15 @@ final class JournalDatabase: @unchecked Sendable {
             try execute("PRAGMA trusted_schema=OFF"); _ = try query("PRAGMA wal_autocheckpoint=1000")
             guard try query("PRAGMA journal_mode").first?.first?.string == "wal",
                   try query("PRAGMA synchronous").first?.first?.integer == 2,
-                  try query("PRAGMA fullfsync").first?.first?.integer == 1 else {
-                throw JournalError.database("Required durability settings were not accepted.")
-            }
+                  try query("PRAGMA fullfsync").first?.first?.integer == 1 else { throw JournalError.database("Required durability settings were not accepted.") }
             let version = try query("PRAGMA user_version").first?.first?.integer ?? -1
             guard version == 0 || version == 1 else { throw JournalError.database("Unknown schema version; original database retained.") }
             try transaction {
                 try execute("CREATE TABLE IF NOT EXISTS operations(id TEXT PRIMARY KEY, title TEXT NOT NULL, started REAL NOT NULL, state TEXT NOT NULL, checkpoint INTEGER NOT NULL DEFAULT 0, receipt BLOB, warning TEXT)")
                 try execute("CREATE TABLE IF NOT EXISTS mutations(id INTEGER PRIMARY KEY AUTOINCREMENT, operation TEXT NOT NULL REFERENCES operations(id), kind TEXT NOT NULL, phase TEXT NOT NULL, payload BLOB NOT NULL, outcome BLOB)")
-                try execute("CREATE INDEX IF NOT EXISTS mutations_operation ON mutations(operation,id)")
-                try execute("PRAGMA user_version=1")
+                try execute("CREATE INDEX IF NOT EXISTS mutations_operation ON mutations(operation,id)"); try execute("PRAGMA user_version=1")
             }
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: database.path)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: databasePath)
         } catch { closeResources(); throw error }
     }
     deinit { closeResources() }
@@ -85,8 +82,7 @@ final class JournalDatabase: @unchecked Sendable {
     @discardableResult func execute(_ sql: String, _ arguments: [SQLValue] = []) throws -> Int64 {
         lock.lock(); defer { lock.unlock() }
         let statement = try prepare(sql, arguments); defer { sqlite3_finalize(statement) }
-        guard sqlite3_step(statement) == SQLITE_DONE else { throw failure() }
-        return sqlite3_last_insert_rowid(handle)
+        guard sqlite3_step(statement) == SQLITE_DONE else { throw failure() }; return sqlite3_last_insert_rowid(handle)
     }
     func query(_ sql: String, _ arguments: [SQLValue] = [], limit: Int = 500_000) throws -> [[SQLValue]] {
         lock.lock(); defer { lock.unlock() }
@@ -114,8 +110,7 @@ final class JournalDatabase: @unchecked Sendable {
         }
     }
     func transaction<T>(_ body: () throws -> T) throws -> T {
-        lock.lock(); defer { lock.unlock() }
-        try execute("BEGIN IMMEDIATE")
+        lock.lock(); defer { lock.unlock() }; try execute("BEGIN IMMEDIATE")
         do { let value = try body(); try execute("COMMIT"); return value }
         catch { _ = try? execute("ROLLBACK"); throw error }
     }

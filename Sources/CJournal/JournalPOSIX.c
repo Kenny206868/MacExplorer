@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 #if defined(__linux__)
 #include <sys/syscall.h>
 #include <linux/fs.h>
@@ -63,3 +64,5 @@ int me_sync_path(const char *path) {
 #endif
     close(fd); errno = saved; return result;
 }
+char *me_realpath(const char *path) { return realpath(path, NULL); }
+void me_free(void *pointer) { free(pointer); }
