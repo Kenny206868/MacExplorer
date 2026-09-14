@@ -1,81 +1,53 @@
-# User guide
+# MacExplorer user guide
 
-## Familiar layout
+## Your workspace
 
-The top strip contains tabs. Below it are the command bar, navigation buttons, editable breadcrumb/address field, and search. The left tree contains Home, Gallery, cloud roots, Quick Access, mounted devices, network, Trash, tags, and saved searches. The main area shows real files. Details and Quick Look Preview can be shown independently on the right.
+The tab strip, command bar, address/search row and file area follow Explorer conventions, with macOS visuals and system integration. The sidebar contains Home, Gallery, available cloud roots, pinned folders, This Mac, Network, Trash, tags and saved searches. Home shows files opened by MacExplorer; its recent list starts empty on a fresh installation.
 
-Home's recent list starts empty and contains files opened with MacExplorer. Pin folders using the context menu; unpin from the tree. Gallery enumerates image files beneath Pictures, not the Photos database.
+Double-click a folder to enter it. Use Back/Forward/Up, breadcrumbs, or Cmd/Ctrl+L to edit a path. Absolute paths, relative paths and `~` are accepted. Choose View to change file presentation, sorting/grouping, hidden files, extensions, checkboxes, Details and Preview. Drag a pane divider to resize it. Narrow windows combine Details/Preview rather than discarding either preference.
 
-Double-click folders to enter them. Select a breadcrumb to navigate to an ancestor. Command-L edits the path; absolute, relative, and tilde-prefixed filesystem paths are accepted. Alt-Left/Right go back/forward; Alt-Up goes to the parent. Open Folder uses a native panel.
+Details initially shows Name, Date modified, Kind and Size. Click a header to sort, drag its edge to resize, drag headers to reorder, or open the header context menu to change columns, auto-size or restore defaults. Ordinary rows exist only for actual files. Date cells use a complete date when a full timestamp cannot fit; hover reveals the full value.
 
-## Views and selection
+## Working with two panes
 
-The View menu offers extra-large, large, medium, small, list, details, tiles, content, and gallery layouts. Sort by name, dates, kind, size, or tags; choose direction, folders first, and optional grouping. These settings are remembered per folder. Details uses a native customizable table: resize/reorder columns and use its column customization controls. Check boxes are a Details-view option.
+Click the split-pane command or press **Cmd/Ctrl+Shift+D**. Each pane has its own tabs, navigation history, current folder, view, search and selection. The numbered badge and accent line identify the active pane. Click a file area or its numbered badge to focus it; Tab switches panes when the file area owns keyboard focus. The shared top controls and sidebar follow that pane.
 
-Click to select, Command/Control-click to toggle, and Shift-click for a range. Command-A selects all. More → Invert Selection selects the remainder. Icon/list views can be configured for single-click opening. Rubber-band selection and full outbound multi-item drag parity are not part of this version.
+Both pane paths remain visible. Click a path to edit it directly, or use its menu to copy the path or navigate to an ancestor. The pane title menu switches that pane's tabs. The bottom layout menu chooses Side by Side or Stacked, equal widths, Swap Locations, or Same Location in Other Pane. A narrow window automatically stacks the browsers without changing saved layout preference. A wide window can also show the shared inspector.
 
-## File work
+Select files in the source pane and choose **Copy to other pane** or **Move…**. The destination is the other pane's current folder; wide layouts display its path beside the commands. Cmd/Ctrl+Option+C copies, while Cmd/Ctrl+Option+M requests a move. Moving requires confirmation, and identities are checked again before execution. Source and destination conflicts use the normal collision dialog, not silent overwrite. These actions do not create a permanent synchronized-folder relationship.
 
-Use New → Folder or Text Document. F2 opens Rename. For multiple selected files the rename dialog previews find/replace, prefixes, suffixes, and templates using `{name}` and `{n}`. Numbering has configurable start and padding. Rename preflights the batch and does not overwrite unrelated files.
+## Selection, keyboard and touch-friendly controls
 
-Cut/Copy/Paste use the native pasteboard. Command-X/C/V and Control-X/C/V work when a file view has focus. The private cut state is invalidated when another application changes the pasteboard. Copy To and Move To offer pins or a chosen folder.
+Click selects one item; Command/Control-click toggles it; Shift-click extends a range. Shift+arrows extends keyboard selection, Control+arrows moves focus without replacing the selection, and Control+Space toggles the focused item. Home/End and Page Up/Down move through the file area; typing matches file names. Select All and Invert Selection are in More. Drag through empty grid space to draw a selection rectangle; dragging near the edge scrolls it.
 
-Drop a file URL onto a folder to copy it. Hold **Shift** to request a move. The prototype and native app do not claim Finder's complete volume-dependent drag heuristic. Tile drags currently export the dragged item rather than an arbitrary selected set.
+Enable **View → Touch-friendly controls** for larger file rows, headers and common action targets. Select mode lets taps add/remove files without modifier keys. Open and More Actions are explicit buttons; a stationary long press opens actions for the touched file or its selected group. Single-click-open does not navigate away while Select mode is active. This remains a macOS app: physical touch depends on the connected hardware/driver delivering supported events.
 
-A collision dialog offers Keep Both, Replace, Skip, or Cancel. Keep Both chooses a numbered name. Replace keeps the old destination as a hidden `.MacExplorer-replaced-*` backup. **Replacing a folder replaces the folder; it does not merge children.** File Operations shows progress, pause/resume, cancellation, and per-item errors. Progress is top-level item based, not a byte-throughput graph. A large in-flight system copy may finish its current file before cancellation takes effect.
+F1 opens Keyboard & Gestures. F2 renames, F3 searches, F4 edits the address, F5 refreshes and F6 cycles address/search/files focus. Space opens Quick Look; Return opens selected files; forward Delete uses Trash, and Shift+Delete asks for permanent deletion. Cmd/Ctrl+T and W create/close tabs; Cmd/Ctrl+Shift+T reopens a closed tab. Control+Tab or Control+Page Up/Down cycles tabs and Cmd/Ctrl+1…9 selects them. Function keys may require Fn depending on keyboard settings.
 
-Command-Z and Shift-Command-Z undo/redo reversible operations. Recovery History lists completed-step receipts preserved across launches. Recovery refuses files that no longer match their recorded identity or destinations occupied by newer data. Do not delete receipts or hidden replacement backups until you have decided they are no longer needed. A receipt is not a backup of every byte.
+Text fields keep their own Cut/Copy/Paste/Select All/Undo and cursor keys. Tab in an editor or native dialog is not a file-pane switch. Trackpad swipes navigate history, pinching changes icon density, and Gallery supports image magnification. The gesture setting disables application gesture handling; system-assigned gestures and device capabilities may affect delivery. Cmd/Ctrl plus or minus changes file view density outside text editing.
 
-Delete moves selected files to Trash. Shift-Delete requests permanent deletion with confirmation. Permanent deletion has no undo and is not secure erase. Items trashed by MacExplorer have recorded restore destinations. MacExplorer does not invent original paths for files trashed by other applications; use Finder for those restorations.
+## Dragging, clipboard and transfers
 
-## Preview, share, and properties
+Drag a selected file to transfer the selected group, including native file URLs and file promises for compatible receivers. Dropping into MacExplorer copies by default; Shift requests a move. Hover over a folder to spring-load it. Source selection belongs to the pane where the drag started, even when another pane was previously active. Incoming promised files are received into private staging and installed through the normal operation engine.
 
-Space or Command-Y invokes macOS Quick Look. The Preview pane embeds Apple's preview surface; installed preview extensions determine supported formats. Online-only files may need downloading first. Share opens the native share sheet, including AirDrop when available. Open With lists applications registered for the selected file.
+Cut/copy/paste uses the macOS pasteboard. Cut files are dimmed; the cut generation is reserved during the move. Skipped, cancelled or failed sources stay available for another paste. A finishing operation never replaces newer clipboard contents. Other applications do not share MacExplorer's internal cut marker.
 
-Command-I opens Properties. It includes real file dates, size, type, location, owner/group, permissions, tags, and cloud status. Calculate folder allocated size or a streaming SHA-256 checksum explicitly; these operations are cancellable. Tags edit Finder tag names. Permissions and lock changes apply only to the selected item, not recursively, and are not undoable in MacExplorer. Setting a default application uses Apple's consent-aware API.
+A collision offers **Keep Both**, **Skip**, **Replace**, or **Merge Folders** when eligible. Replace replaces the whole destination item and retains a hidden recovery backup. Merge preserves destination-only children and resolves conflicting files separately. Packages and symbolic links are not traversed as ordinary merge folders. Cancel stops at safe checkpoints; completed child operations are retained with recovery receipts rather than rolled back automatically.
 
-Compress creates a ZIP with macOS ditto. Extract creates a new folder through libarchive. Unsafe archive paths, links, special entries, duplicate names, or safety-limit violations are rejected. Encrypted archives and in-place archive editing are not supported. Extraction does not reconstruct ditto AppleDouble metadata.
+File Operations shows queue state, counts, transferred/logical bytes, measured throughput and an estimate where enough data is available. Clone operations can complete with little data copying. Pause/cancel are cooperative; a blocking system call may take time to return. Undo/Redo and Recovery History protect against changes made after the original operation. Recovery is not a complete crash write-ahead journal: inspect retained recovery objects after an interrupted process rather than assuming every crash has already been repaired.
 
-## Search
+## Rename, archives and properties
 
-Search is literal by default. Examples:
+New creates a folder or text document. F2 renames one item or opens batch rename for a selection. Batch rename previews find/replace, prefixes/suffixes and `{name}`/`{n}` templates with numbering and extension options. Execution supports cycles and swaps without intentionally overwriting siblings.
 
-```text
-quarterly report
-"release notes" ext:md
-ext:pdf size:>10MB
-kind:folder
-modified:today
-modified:week
-tag:Work
-content:"pump specification"
-```
+Compress creates a ZIP. **Browse / Extract Archive…** opens a native archive browser with folder navigation, filtering, selection, destination choice and password entry. Extract Selected or Extract All installs into a new folder. Passwords are passed to the archive library and are not saved to preferences or recovery logs. Unsafe paths/links, duplicate entries and excessive expansion are rejected. In-place editing inside an archive is not implemented.
 
-The current-folder search can include descendants. This Mac uses Spotlight. Content queries always use Spotlight; results depend on indexing and permissions, not a separate crawler. Save Search retains the expression. The recursive result limit is 25,000; the UI reports truncation rather than silently claiming an exhaustive result.
+Properties and Details show filesystem information. Tags modifies Finder tags, while properties provide lock/permission controls and SHA-256. These metadata edits are not undoable; a multi-item edit can report partial completion. Preview and Gallery rotation do not change the source document. Quick Look and Open With use available native macOS handlers.
 
-## macOS services
+## System integration and releases
 
-This Mac shows actual mounted volumes and capacity. Eject uses the system API and reports busy/error conditions. Network discovers SMB servers that advertise through Bonjour. Command-K accepts a server address and delegates authentication and mounting to macOS. No server passwords are stored by MacExplorer.
+Connect to Server uses macOS authentication; MacExplorer does not collect server passwords. This Mac shows mounted volumes and capacity; Eject delegates to the system. iCloud and other File Provider roots are discovered, but provider-specific features vary. Folder association and launch-at-login are opt-in. Services and file/open URL events require running the complete application bundle.
 
-Cloud roots include iCloud Drive and visible File Provider folders. iCloud download/eviction actions apply to ubiquitous items; third-party providers may implement different behavior. MacExplorer does not fabricate their sync state.
+Tabs, open windows and closed-window history are persisted, including dual-pane companions. Reopen closed windows from Window History. Saved frame positions are clamped to available screens. Application termination waits for active file operations to finish or be cancelled.
 
-Install in Applications to use Finder → Services → Open in MacExplorer, `open -a MacExplorer /path`, or `macexplorer://open?path=/path`. Settings → Integration offers explicit folder-handler and login-item opt-ins. Both are reversible. Finder's system desktop, Dock contracts, and other apps' open/save panels continue to exist.
-
-## Keyboard reference
-
-| Action | Shortcut |
-|---|---|
-| New window / new tab / close tab | Command-N / Command-T / Command-W |
-| New folder | Shift-Command-N |
-| Address / search | Command-L / Command-F |
-| Back / forward / up | Alt-Left / Alt-Right / Alt-Up |
-| Rename / refresh | F2 / F5 (Fn may be required on Mac keyboards) |
-| Open / Quick Look | Enter / Space |
-| Properties / server / operations | Command-I / Command-K / Command-J |
-| Cut / copy / paste | Command-X / C / V; selected Control equivalents |
-| Copy paths | Shift-Command-C |
-| Trash / permanent deletion | Delete / Shift-Delete |
-| Undo / redo | Command-Z / Shift-Command-Z |
-| Hidden items | Shift-Command-period |
-
-Shortcuts are scoped to the application and do not intercept typing in text fields. See the capability matrix for remaining parity limitations.
+Install alpha ZIP/DMG distributions from the repository Releases page and read the included `INSTALL.md`. Alphas are ad-hoc signed, not Apple notarized; do not disable macOS security globally. Each alpha includes source, the sample-data design, native screenshot galleries, a commit identity and checksums. Production signing/notarization and Sparkle updates require owner-configured keys. See [capabilities](CAPABILITIES.md) for the current implementation boundaries.

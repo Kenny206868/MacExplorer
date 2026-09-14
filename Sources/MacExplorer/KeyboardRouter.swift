@@ -3,18 +3,20 @@ import ExplorerCore
 
 extension Notification.Name { static let explorerNewWindow = Notification.Name("MacExplorer.newWindow") }
 
-/// One command path for every SwiftUI file surface. Text fields, native sheets,
-/// Quick Look and keyboard-focused controls retain their own event domains.
+/// One command path for every SwiftUI file surface. Editors and native modal
+/// surfaces keep their own event domains; file keys target only the active pane.
 @MainActor enum KeyboardRouter {
     static func handle(_ event: NSEvent) -> NSEvent? {
         guard let workspace = AppRouter.shared.active, event.window == workspace.window,
               event.window?.attachedSheet == nil, workspace.sheet == nil, workspace.conflict == nil,
-              workspace.message == nil, workspace.pendingDeletion.isEmpty,
-              workspace.windowRoot.pendingPaneTransfer == nil else { return event }
+              workspace.message == nil, workspace.pendingDeletion.isEmpty, workspace.windowRoot.pendingPaneTransfer == nil else { return event }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let control = flags.contains(.control), command = flags.contains(.command), shift = flags.contains(.shift), option = flags.contains(.option)
         let text = event.charactersIgnoringModifiers?.lowercased() ?? ""
         if control && event.keyCode == 48 { workspace.cycleTab(shift ? -1 : 1); return nil }
+        if control && !command && !option && (event.keyCode == 116 || event.keyCode == 121) {
+            workspace.cycleTab(event.keyCode == 116 ? -1 : 1); return nil
+        }
         if event.keyCode == 97 && !command && !control && !option { workspace.cycleFocus(backwards: shift); return nil }
         let editing = event.window?.firstResponder is NSTextView || event.window?.firstResponder is NSTextField
         if editing {
@@ -32,13 +34,12 @@ extension Notification.Name { static let explorerNewWindow = Notification.Name("
             }
             return event
         }
+        if command && !control && !option && ["+", "=", "-"].contains(text) { workspace.zoomFileView(text == "-" ? -1 : 1); return nil }
         if (command || control) && shift && text == "d" && !option { workspace.toggleDualPane(); return nil }
         if (command || control) && option && (text == "c" || text == "m") {
             workspace.paneController?.requestTransfer(from: workspace, move: text == "m"); return nil
         }
-        if (command || control), let number = Int(text), (1...9).contains(number), !option {
-            workspace.selectTab(number: number); return nil
-        }
+        if (command || control), let number = Int(text), (1...9).contains(number), !option { workspace.selectTab(number: number); return nil }
         if option && !command && !control {
             switch event.keyCode {
             case 123: workspace.current.back(); return nil
@@ -49,9 +50,7 @@ extension Notification.Name { static let explorerNewWindow = Notification.Name("
             }
         }
         if control && !command && !option {
-            if [123, 124, 125, 126, 115, 119].contains(event.keyCode) {
-                workspace.keyboardMove(event.keyCode, shift: shift, control: true); return nil
-            }
+            if [123, 124, 125, 126, 115, 119].contains(event.keyCode) { workspace.keyboardMove(event.keyCode, shift: shift, control: true); return nil }
             if event.keyCode == 49 { workspace.toggleFocusedSelection(); return nil }
             if event.keyCode == 118 { workspace.closeTab(workspace.activeID); return nil }
             switch text {
@@ -87,8 +86,7 @@ extension Notification.Name { static let explorerNewWindow = Notification.Name("
         guard workspace.fileSurfaceFocused else { return event }
         switch event.keyCode {
         case 48:
-            if let controller = workspace.paneController { controller.focus(controller.geometry.focused.other, files: true); return nil }
-            return event
+            if let controller = workspace.paneController { controller.focus(controller.geometry.focused.other, files: true); return nil }; return event
         case 51: workspace.current.back(); return nil
         case 117: workspace.delete(permanent: shift); return nil
         case 49: workspace.quickLook(); return nil
@@ -96,14 +94,13 @@ extension Notification.Name { static let explorerNewWindow = Notification.Name("
         case 53:
             workspace.current.previewURL = nil; workspace.current.selection = []; workspace.current.rangeBaseline = nil
             workspace.current.typeAhead.reset(); workspace.touchSelecting = false; return nil
-        case 115, 119, 123, 124, 125, 126:
-            workspace.keyboardMove(event.keyCode, shift: shift, control: false); return nil
+        case 115, 119, 123, 124, 125, 126: workspace.keyboardMove(event.keyCode, shift: shift, control: false); return nil
         case 116, 121:
             let grid = ![.details, .list, .content, .gallery].contains(workspace.current.options.view)
-            let rowHeight = grid ? workspace.current.options.view.iconSize + 63 : Double(InputPreferences.shared.rowHeight(compact: workspace.preferences.value.compact))
+            let input = InputPreferences.shared
+            let rowHeight = grid ? Double(input.gridCellHeight(workspace.current.options.view)) + 10 : workspace.current.options.view == .content ? 70 : Double(input.rowHeight(compact: workspace.preferences.value.compact))
             let rows = max(1, Int(workspace.fileViewportHeight / max(1, rowHeight)) - 1)
-            workspace.moveSelection(rows * (grid ? max(1, workspace.current.gridColumns) : 1) * (event.keyCode == 116 ? -1 : 1), extend: shift)
-            return nil
+            workspace.moveSelection(rows * (grid ? max(1, workspace.current.gridColumns) : 1) * (event.keyCode == 116 ? -1 : 1), extend: shift); return nil
         default:
             if let text = event.characters, !text.isEmpty,
                !text.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) || (0xF700...0xF8FF).contains($0.value) }),

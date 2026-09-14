@@ -2,7 +2,6 @@ import SwiftUI
 import AppKit
 import ExplorerCore
 
-/// Native input regions are transparent to ordinary SwiftUI hit testing.
 struct PaneInputBridge: NSViewRepresentable {
     let workspace: ExplorerWorkspace
     func makeNSView(context: Context) -> PaneInputRegion {
@@ -21,19 +20,19 @@ struct PaneInputBridge: NSViewRepresentable {
     static let shared = PaneInputRouter()
     private let regions = NSHashTable<PaneInputRegion>.weakObjects()
     private var monitor: Any?
-    private var magnification = 0.0
+    private var pinch = PinchAccumulator()
+    private weak var gestureOwner: ExplorerWorkspace?
     private var pressureTriggered = false
     func register(_ view: PaneInputRegion) {
         regions.add(view); guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .swipe, .magnify, .smartMagnify, .pressure]) { [weak self] event in
             guard let self else { return event }
-            let consumed = MainActor.assumeIsolated { self.handle(event) == nil }
-            return consumed ? nil : event
+            let consumed = MainActor.assumeIsolated { self.handle(event) == nil }; return consumed ? nil : event
         }
     }
     func unregister(_ view: PaneInputRegion) {
         regions.remove(view)
-        if regions.allObjects.isEmpty, let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
+        if regions.allObjects.isEmpty, let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil; pinch.reset(); gestureOwner = nil }
     }
     func workspace(at point: NSPoint, in window: NSWindow?) -> ExplorerWorkspace? {
         guard let window else { return nil }
@@ -56,7 +55,8 @@ struct PaneInputBridge: NSViewRepresentable {
             }
             return event
         }
-        guard InputPreferences.shared.gesturesEnabled else { return event }
+        guard InputPreferences.shared.gesturesEnabled else { pinch.reset(); pressureTriggered = false; return event }
+        if gestureOwner !== workspace { pinch.reset(); pressureTriggered = false; gestureOwner = workspace }
         workspace.activatePane()
         switch event.type {
         case .swipe:
@@ -64,10 +64,9 @@ struct PaneInputBridge: NSViewRepresentable {
                 if event.deltaX > 0 { workspace.current.back() } else { workspace.current.forward() }; return nil
             }
         case .magnify where workspace.current.options.view != .gallery:
-            if event.phase.contains(.began) { magnification = 0 }
-            magnification += Double(event.magnification)
-            if abs(magnification) >= 0.18 { workspace.zoomFileView(magnification > 0 ? 1 : -1); magnification = 0 }
-            if event.phase.contains(.ended) || event.phase.contains(.cancelled) { magnification = 0 }; return nil
+            let direction = pinch.consume(Double(event.magnification), owner: workspace.id,
+                began: event.phase.contains(.began), ended: event.phase.contains(.ended), cancelled: event.phase.contains(.cancelled))
+            if direction != 0 { workspace.zoomFileView(direction) }; return nil
         case .smartMagnify: workspace.quickLook(); return nil
         case .pressure:
             if event.stage >= 2, !pressureTriggered { pressureTriggered = true; workspace.quickLook() }
