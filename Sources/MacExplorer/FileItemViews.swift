@@ -18,7 +18,7 @@ struct FileTile: View {
     var body: some View {
         interactiveSurface.contextMenu { FileContextMenu(workspace: workspace, urls: menuURLs) }
             .modifier(FileInteractionModifier(entry: entry, workspace: workspace, tab: tab))
-            .accessibilityElement(children: .combine).accessibilityLabel(entry.name + ", " + entry.kind)
+            .accessibilityElement(children: .contain).accessibilityLabel(entry.name + ", " + entry.kind)
             .accessibilityAddTraits(selected ? [.isSelected, .isButton] : .isButton)
             .accessibilityAction { workspace.tapFile(entry.url, modifiers: []) }
             .accessibilityAction(named: Text("Open")) { workspace.activateFile(entry, doubleClick: true) }.help(entry.url.path)
@@ -52,11 +52,10 @@ struct FileTile: View {
     }
     private func labels(alignment: HorizontalAlignment) -> some View {
         VStack(alignment: alignment, spacing: 4) {
-            Text(displayName(entry, extensions: preferences.value.showExtensions)).font(.system(size: 11)).lineLimit(horizontal ? 1 : 2)
-                .multilineTextAlignment(horizontal ? .leading : .center).foregroundStyle(ExplorerDesign.text)
+            FileNameLabel(entry: entry, tab: tab, lines: horizontal ? 1 : 2, centered: !horizontal).font(.system(size: 11))
             if tab.options.view == .tiles {
-                Text(entry.kind).font(.system(size: 10)).foregroundStyle(ExplorerDesign.muted).lineLimit(1)
-                Text(entry.sizeText).font(.system(size: 10)).foregroundStyle(ExplorerDesign.muted)
+                Text(entry.conciseKind).font(.system(size: 10)).foregroundStyle(ExplorerDesign.muted).lineLimit(1)
+                Text(entry.compactSizeText).font(.system(size: 10)).foregroundStyle(ExplorerDesign.muted)
             }
         }
     }
@@ -75,21 +74,24 @@ struct FileWideRow: View {
         surface.contentShape(Rectangle()).onHover { hovered = $0 }
             .contextMenu { FileContextMenu(workspace: workspace, urls: menuURLs) }
             .modifier(FileInteractionModifier(entry: entry, workspace: workspace, tab: tab))
-            .accessibilityElement(children: .combine).accessibilityAddTraits(selected ? [.isSelected, .isButton] : .isButton)
+            .accessibilityElement(children: .contain).accessibilityAddTraits(selected ? [.isSelected, .isButton] : .isButton)
             .accessibilityAction { workspace.tapFile(entry.url, modifiers: []) }
             .accessibilityAction(named: Text("Open")) { workspace.activateFile(entry, doubleClick: true) }
     }
     private var surface: some View {
         HStack(spacing: 12) {
-            if preferences.value.checkboxes || workspace.touchSelecting { Toggle("Select " + entry.name, isOn: Binding(get: { selected }, set: { _ in workspace.select(entry.url, extend: true, range: false) })).labelsHidden().toggleStyle(.checkbox).frame(minWidth: input.touchFriendly ? 36 : nil, minHeight: input.touchFriendly ? 36 : nil) }
+            if preferences.value.checkboxes || workspace.touchSelecting {
+                Toggle("Select " + entry.name, isOn: Binding(get: { selected }, set: { _ in workspace.select(entry.url, extend: true, range: false) }))
+                    .labelsHidden().toggleStyle(.checkbox).frame(minWidth: input.touchFriendly ? 36 : nil, minHeight: input.touchFriendly ? 36 : nil)
+            }
             FileArtwork(entry: entry, size: detailed ? 42 : 20)
             VStack(alignment: .leading, spacing: 5) {
-                Text(displayName(entry, extensions: preferences.value.showExtensions)).font(.system(size: input.fileFontSize)).lineLimit(1).truncationMode(.middle).foregroundStyle(ExplorerDesign.text)
+                FileNameLabel(entry: entry, tab: tab).font(.system(size: input.fileFontSize))
                 if detailed { Text(entry.url.deletingLastPathComponent().path).font(.system(size: 10)).foregroundStyle(ExplorerDesign.muted).lineLimit(1).truncationMode(.middle) }
             }
             Spacer(minLength: 8)
             if detailed { Text(entry.modified.formatted(date: .abbreviated, time: .omitted)).font(.system(size: 10)).foregroundStyle(ExplorerDesign.muted).lineLimit(1) }
-            Text(entry.sizeText).font(.system(size: 10)).foregroundStyle(ExplorerDesign.muted).frame(width: 65, alignment: .trailing).monospacedDigit().lineLimit(1)
+            Text(entry.compactSizeText).font(.system(size: 10)).foregroundStyle(ExplorerDesign.muted).frame(width: 65, alignment: .trailing).monospacedDigit().lineLimit(1)
         }.padding(.horizontal, 12).frame(height: detailed ? 70 : input.rowHeight(compact: preferences.value.compact))
             .background(selected ? ExplorerDesign.selection : hovered ? ExplorerDesign.hover.opacity(0.5) : ExplorerDesign.canvas, in: RoundedRectangle(cornerRadius: 6))
             .overlay(alignment: .bottom) { Rectangle().fill(ExplorerDesign.separator.opacity(detailed ? 0.7 : 0.35)).frame(height: 0.5) }

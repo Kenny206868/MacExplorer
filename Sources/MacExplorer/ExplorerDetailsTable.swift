@@ -34,8 +34,7 @@ struct FileDetailsTable: View {
                                 .overlay(alignment: .bottom) { ExplorerRule() }.explorerRegion("details.header")
                         }
                     }.frame(width: total).frame(minHeight: geometry.size.height, alignment: .top)
-                        .background(ExplorerDesign.canvas)
-                        .background(ScrollViewportMetrics { scrollbarGutter = $0 })
+                        .background(ExplorerDesign.canvas).background(ScrollViewportMetrics { scrollbarGutter = $0 })
                         .modifier(DetailsMarquee(workspace: workspace, tab: tab, geometry: layout, entries: tab.navigableEntries))
                         .contextMenu { FileContextMenu(workspace: workspace, urls: []) }
                 }.onChange(of: tab.focusedURL) { _, url in if let url { proxy.scrollTo(url) } }
@@ -48,8 +47,7 @@ struct FileDetailsTable: View {
                 Image(systemName: tab.collapsedGroups.contains(title) ? "chevron.right" : "chevron.down").font(.system(size: 9, weight: .semibold))
                 Text(title).fontWeight(.semibold); Text("\(count)").foregroundStyle(ExplorerDesign.muted); Spacer()
             }.font(.system(size: 11)).padding(.horizontal, 14).frame(height: input.headerHeight).background(ExplorerDesign.chrome)
-        }.buttonStyle(.plain).accessibilityLabel(title + ", \(count) items")
-            .accessibilityValue(tab.collapsedGroups.contains(title) ? "Collapsed" : "Expanded")
+        }.buttonStyle(.plain).accessibilityLabel(title + ", \(count) items").accessibilityValue(tab.collapsedGroups.contains(title) ? "Collapsed" : "Expanded")
     }
 }
 private struct DetailsFileRow: View {
@@ -65,7 +63,7 @@ private struct DetailsFileRow: View {
     private var menuURLs: [URL] { selected ? workspace.selectedURLs : [entry.url] }
     private var rowColor: Color { selected ? ExplorerDesign.selection : hovered ? ExplorerDesign.hover.opacity(0.65) : ExplorerDesign.canvas }
     var body: some View {
-        interaction.accessibilityElement(children: .ignore)
+        interaction.accessibilityElement(children: .contain)
             .accessibilityLabel(entry.name + ", " + entry.kind + ", " + entry.sizeText)
             .accessibilityAddTraits(selected ? [.isSelected, .isButton] : .isButton)
             .accessibilityAction { workspace.tapFile(entry.url, modifiers: []) }
@@ -83,8 +81,7 @@ private struct DetailsFileRow: View {
                 cell(column).padding(.horizontal, 12).frame(width: widths[index], alignment: column == .size ? .trailing : .leading)
             }
         }.font(.system(size: input.fileFontSize)).frame(height: input.rowHeight(compact: preferences.value.compact))
-            .background(rowColor)
-            .overlay(alignment: .bottom) { Rectangle().fill(ExplorerDesign.separator.opacity(0.42)).frame(height: 0.5) }
+            .background(rowColor).overlay(alignment: .bottom) { Rectangle().fill(ExplorerDesign.separator.opacity(0.42)).frame(height: 0.5) }
             .overlay { if tab.focusedURL == entry.url { Rectangle().stroke(Color.accentColor.opacity(0.6), lineWidth: 1).padding(1).allowsHitTesting(false) } }
     }
     @ViewBuilder private func cell(_ column: DetailsColumn) -> some View {
@@ -96,7 +93,7 @@ private struct DetailsFileRow: View {
                         .labelsHidden().toggleStyle(.checkbox).frame(minWidth: input.touchFriendly ? 36 : nil, minHeight: input.touchFriendly ? 40 : nil)
                 }
                 FileThumbnail(entry: entry, size: 20)
-                Text(displayName(entry, extensions: preferences.value.showExtensions)).lineLimit(1).truncationMode(.middle).foregroundStyle(ExplorerDesign.text)
+                FileNameLabel(entry: entry, tab: tab)
                 if entry.isLocked { Image(systemName: "lock.fill").font(.system(size: 9)).foregroundStyle(ExplorerDesign.muted) }
             }
         case .modified:
@@ -131,8 +128,7 @@ private struct DetailsColumnHeader: View {
             }.font(.system(size: 10)).foregroundStyle(ExplorerDesign.muted).padding(.horizontal, 12).frame(height: input.headerHeight)
                 .background(targeted ? ExplorerDesign.selection : ExplorerDesign.canvas)
         }.buttonStyle(.plain).frame(width: width)
-            .onDrag { store.begin(column) }
-            .onDrop(of: [DetailsColumnStore.dragType], isTargeted: $targeted) { store.accept($0, before: column) }
+            .onDrag { store.begin(column) }.onDrop(of: [DetailsColumnStore.dragType], isTargeted: $targeted) { store.accept($0, before: column) }
             .overlay(alignment: .trailing) { resizeHandle }.contextMenu { columnMenu }
             .accessibilityLabel(column.title + (column.sort == tab.options.sort ? (tab.options.descending ? ", sorted descending" : ", sorted ascending") : ""))
     }
@@ -147,12 +143,9 @@ private struct DetailsColumnHeader: View {
     }
     private var columnMenu: some View {
         Group {
-            ForEach(DetailsColumn.allCases) { item in
-                Toggle(item.title, isOn: Binding(get: { store.value.visible.contains(item) }, set: { _ in store.toggle(item) })).disabled(item == .name)
-            }
+            ForEach(DetailsColumn.allCases) { item in Toggle(item.title, isOn: Binding(get: { store.value.visible.contains(item) }, set: { _ in store.toggle(item) })).disabled(item == .name) }
             Divider(); Button("Size Column to Fit", action: sizeToFit)
-            Button("Automatic Column Widths") { store.value.overrides = [:]; store.save() }
-            Button("Reset Columns") { store.reset() }
+            Button("Automatic Column Widths") { store.value.overrides = [:]; store.save() }; Button("Reset Columns") { store.reset() }
         }
     }
     private func sort() {

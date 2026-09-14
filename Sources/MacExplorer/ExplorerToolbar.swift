@@ -21,7 +21,7 @@ struct ExplorerCommandBar: View {
             CommandIcon("Copy", "square.on.square", disabled: workspace.selected.isEmpty) { workspace.copy() }
             CommandIcon("Paste", "doc.on.clipboard", disabled: workspace.destination == nil) { workspace.paste() }
             if !compact && !input.touchFriendly {
-                CommandIcon("Rename (F2)", "character.cursor.ibeam", disabled: workspace.selected.isEmpty) { workspace.sheet = .rename }
+                CommandIcon("Rename (F2)", "character.cursor.ibeam", disabled: workspace.selected.isEmpty) { workspace.requestRename() }
                 ShareLink(items: workspace.selectedURLs) { Image(systemName: "square.and.arrow.up").font(.system(size: 14)).frame(width: 32, height: 32) }
                     .buttonStyle(ExplorerIconStyle()).disabled(workspace.selected.isEmpty).help("Share / AirDrop").accessibilityLabel("Share selected files")
             }
@@ -45,7 +45,7 @@ struct ExplorerCommandBar: View {
                 Divider(); Toggle("Preview pane", isOn: $preferences.value.previewPane); Toggle("Details pane", isOn: $preferences.value.inspector)
             } label: { ExplorerMenuLabel(title: "View", symbol: "square.grid.2x2") }.fixedSize()
             Menu {
-                Button("Rename…") { workspace.sheet = .rename }.disabled(workspace.selected.isEmpty)
+                Button("Rename") { workspace.requestRename() }.disabled(workspace.selected.isEmpty)
                 ShareLink(items: workspace.selectedURLs) { Text("Share…") }.disabled(workspace.selected.isEmpty)
                 Button("File Actions…") { workspace.sheet = .fileActions }.disabled(workspace.selected.isEmpty)
                 Divider(); Button("Select All") { workspace.selectAll() }; Button("Invert Selection") { workspace.invertSelection() }; Button("Clear Selection") { tab.selection = [] }
@@ -55,13 +55,13 @@ struct ExplorerCommandBar: View {
                 Divider(); Button("Open in Terminal") { if let url = workspace.destination { NativeIntegration.terminal(url, owner: workspace) } }.disabled(workspace.destination == nil)
                 Button("Connect to Server…") { workspace.sheet = .connect }; Button("File Operations…") { workspace.sheet = .operations }; Button("Recovery History…") { workspace.sheet = .recovery }
                 Divider(); Button("Keyboard & Gestures…") { workspace.sheet = .keyboardHelp }; SettingsLink { Text("Folder Options…") }
-            } label: { Image(systemName: "ellipsis").frame(width: 30, height: 32) }.help("More actions").accessibilityLabel("More file actions")
+            } label: { Image(systemName: "ellipsis").frame(width: input.target, height: input.target) }.help("More actions").accessibilityLabel("More file actions")
             Spacer(minLength: 4)
             CommandIcon("Dual panes · Cmd/Ctrl+Shift+D", "rectangle.split.2x1", selected: workspace.paneController != nil) { workspace.toggleDualPane() }
             if !compact && !input.touchFriendly { CommandIcon("Preview pane", "rectangle.and.text.magnifyingglass", selected: preferences.value.previewPane) { preferences.value.previewPane.toggle() } }
             Button { preferences.value.inspector.toggle() } label: {
                 HStack(spacing: 8) { Image(systemName: "sidebar.right").font(.system(size: 14)); if !compact && !input.touchFriendly { Text("Details").font(.system(size: 12)) } }
-                    .padding(.horizontal, 9).frame(height: 32)
+                    .padding(.horizontal, 9).frame(height: input.target)
             }.buttonStyle(ExplorerIconStyle(selected: preferences.value.inspector)).help("Toggle Details pane").accessibilityLabel("Details pane")
         }.foregroundStyle(ExplorerDesign.text).buttonStyle(ExplorerIconStyle()).menuStyle(.borderlessButton).menuIndicator(.hidden)
             .padding(.horizontal, 16).frame(height: ExplorerDesign.toolbarHeight).background(ExplorerDesign.canvas)

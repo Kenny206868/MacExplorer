@@ -5,7 +5,7 @@ import ExplorerCore
 struct FileContextMenu: View {
     @ObservedObject var workspace: ExplorerWorkspace
     let urls: [URL]
-    private func perform(_ action: () -> Void) { workspace.current.selection = Set(urls); action() }
+    private func perform(_ action: () -> Void) { workspace.activatePane(); workspace.current.selection = Set(urls); action() }
     var body: some View {
         if urls.isEmpty {
             Button("New Folder") { workspace.sheet = .newFolder }.disabled(workspace.destination == nil)
@@ -31,7 +31,7 @@ struct FileContextMenu: View {
             Button("Copy") { FileClipboard.shared.write(urls, cut: false) }
             Button("Copy as Path") { NativeIntegration.copyPaths(urls) }
             Button("Paste") { workspace.paste() }.disabled(workspace.destination == nil)
-            Button("Rename…") { perform { workspace.sheet = .rename } }
+            Button("Rename") { perform { workspace.requestRename() } }
             Button("Duplicate") { perform { workspace.duplicate() } }
             Menu("Copy To") {
                 ForEach(workspace.preferences.value.pins) { pin in Button(pin.url.lastPathComponent) { workspace.transfer(to: pin.url, move: false, urls: urls) } }
@@ -42,16 +42,20 @@ struct FileContextMenu: View {
                 Divider(); Button("Choose Folder…") { NativeIntegration.chooseFolder(owner: workspace) { workspace.transfer(to: $0, move: true, urls: urls) } }
             }
             Button("Move to Trash") { perform { workspace.delete() } }
-            Divider()
-            ShareLink(items: urls) { Text("Share / AirDrop…") }
+            Divider(); ShareLink(items: urls) { Text("Share / AirDrop…") }
             Button("Compress to ZIP") { perform { workspace.compress() } }
             Button("Browse / Extract Archive…") { perform { workspace.extract() } }
             Button("Create Symbolic Link") { perform { workspace.alias() } }
             Button("Tags…") { perform { workspace.sheet = .tags } }
-            Button("Download iCloud Items") { Task { do { try await workspace.current.service.requestDownload(urls); workspace.current.refresh() } catch { workspace.fail("Download failed", error.localizedDescription) } } }
-            Button("Remove iCloud Download") { Task { do { try await workspace.current.service.evict(urls); workspace.current.refresh() } catch { workspace.fail("Could not remove download", error.localizedDescription) } } }
-            Divider()
-            Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting(urls) }
+            Button("Download iCloud Items") {
+                let tab = workspace.current
+                Task { do { try await tab.service.requestDownload(urls); tab.refresh() } catch { workspace.fail("Download failed", error.localizedDescription) } }
+            }
+            Button("Remove iCloud Download") {
+                let tab = workspace.current
+                Task { do { try await tab.service.evict(urls); tab.refresh() } catch { workspace.fail("Could not remove download", error.localizedDescription) } }
+            }
+            Divider(); Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting(urls) }
             Button("Properties…") { perform { workspace.sheet = .properties } }
         }
     }

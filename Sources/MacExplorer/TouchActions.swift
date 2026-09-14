@@ -19,7 +19,7 @@ struct FileActionSheet: View {
                 action("Quick Look", "eye") { workspace.quickLook() }
                 action("Copy", "doc.on.doc") { workspace.copy() }
                 action("Cut", "scissors") { workspace.copy(cut: true) }
-                action("Rename…", "character.cursor.ibeam") { workspace.sheet = .rename }
+                action("Rename", "character.cursor.ibeam") { workspace.requestRename() }
                 action("Properties…", "info.circle") { workspace.sheet = .properties }
                 action("Tags…", "tag") { workspace.sheet = .tags }
                 action("Move to Trash", "trash") { workspace.delete() }
@@ -28,8 +28,7 @@ struct FileActionSheet: View {
                     action("Move to other pane…", "arrow.right.square") { controller.requestTransfer(from: workspace, move: true) }
                 }
             }.disabled(workspace.selected.isEmpty)
-            Text("Use Select mode for multiple files without a keyboard. File operations keep their normal collision and recovery rules.")
-                .font(.caption).foregroundStyle(ExplorerDesign.muted)
+            Text("Use Select mode for multiple files without a keyboard. File operations keep their normal collision and recovery rules.").font(.caption).foregroundStyle(ExplorerDesign.muted)
         }.padding(24).frame(width: 520).background(ExplorerDesign.canvas)
     }
     private func action(_ title: String, _ symbol: String, perform: @escaping () -> Void) -> some View {
@@ -38,15 +37,12 @@ struct FileActionSheet: View {
                 let snapshot = try FileActionSnapshot(workspace)
                 workspace.sheet = nil
                 Task { @MainActor in
-                    do {
-                        try await Task.sleep(for: .milliseconds(250))
-                        try snapshot.validate(); perform()
-                    } catch is CancellationError { }
+                    do { try await Task.sleep(for: .milliseconds(250)); try snapshot.validate(); perform() }
+                    catch is CancellationError { }
                     catch { workspace.fail("File action stopped", error.localizedDescription) }
                 }
             } catch { workspace.sheet = nil; workspace.fail("File action unavailable", error.localizedDescription) }
-        } label: { Label(title, systemImage: symbol).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading) }
-            .buttonStyle(ExplorerButtonStyle())
+        } label: { Label(title, systemImage: symbol).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading) }.buttonStyle(ExplorerButtonStyle())
     }
 }
 struct KeyboardHelpView: View {
@@ -54,10 +50,12 @@ struct KeyboardHelpView: View {
     private let shortcuts: [(String, String)] = [
         ("Cmd/Ctrl + Shift + D", "Toggle dual-pane browsing"),
         ("Tab / Shift + Tab", "Switch between file panes"),
-        ("Cmd/Ctrl + Option + C", "Copy selected files to the other pane"),
-        ("Cmd/Ctrl + Option + M", "Move selected files to the other pane, after confirmation"),
+        ("Cmd + Option + C", "Copy selected files to the other pane"),
+        ("Cmd + Option + M", "Move selected files to the other pane, after confirmation"),
+        ("Control + Option", "Reserved for VoiceOver, never a file action"),
         ("F6 / Shift + F6", "Cycle location, search, and file focus"),
-        ("F2 / F3 / F4 / F5", "Rename / Search / Location / Refresh"),
+        ("F2 / Return / Escape", "Edit a file name / Commit rename / Cancel rename"),
+        ("F3 / F4 / F5", "Search / Location / Refresh"),
         ("Arrow keys · Home · End", "Move selection"),
         ("Page Up / Page Down", "Move by the visible page"),
         ("Shift + navigation", "Extend a contiguous selection"),
@@ -85,8 +83,10 @@ struct KeyboardHelpView: View {
             ScrollView {
                 VStack(spacing: 0) {
                     ForEach(shortcuts, id: \.0) { key, action in
-                        HStack(alignment: .top) { Text(key).font(.system(size: 11, weight: .medium, design: .monospaced)).frame(width: 220, alignment: .leading); Text(action).font(.system(size: 12)).frame(maxWidth: .infinity, alignment: .leading) }
-                            .padding(.vertical, 10).overlay(alignment: .bottom) { ExplorerRule().opacity(0.5) }
+                        HStack(alignment: .top) {
+                            Text(key).font(.system(size: 11, weight: .medium, design: .monospaced)).frame(width: 220, alignment: .leading)
+                            Text(action).font(.system(size: 12)).frame(maxWidth: .infinity, alignment: .leading)
+                        }.padding(.vertical, 10).overlay(alignment: .bottom) { ExplorerRule().opacity(0.5) }
                     }
                 }
             }

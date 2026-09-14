@@ -14,9 +14,7 @@ struct ExplorerCommands: Commands {
     private var hasSelection: Bool { target?.selected.isEmpty == false }
     private var canUndo: Bool { target != nil && !operations.undoStack.isEmpty && operations.runningCount == 0 && !operations.historyBusy }
     private var canRedo: Bool { target != nil && !operations.redoStack.isEmpty && operations.runningCount == 0 && !operations.historyBusy }
-    private var canTransfer: Bool {
-        guard let target else { return false }; return target.paneController?.other(than: target)?.destination != nil
-    }
+    private var canTransfer: Bool { guard let target else { return false }; return target.paneController?.other(than: target)?.destination != nil }
     var body: some Commands {
         CommandGroup(after: .appInfo) { Button("Check for Updates…") { updater.check() }.disabled(!updater.configured || !updater.canCheck) }
         CommandGroup(replacing: .newItem) { newItems }
@@ -61,7 +59,7 @@ struct ExplorerCommands: Commands {
         Button("Clear Selection") { target?.current.selection = [] }.disabled(!hasSelection || TextEditingCommands.isEditing)
     }
     @ViewBuilder private var fileActions: some View {
-        Button("Rename…") { target?.sheet = .rename }
+        Button("Rename") { target?.requestRename() }
         Button("Duplicate") { target?.duplicate() }.keyboardShortcut("d")
         Button("Move to Trash") { target?.delete() }.keyboardShortcut(.delete)
         Button("Delete Permanently…") { target?.delete(permanent: true) }.keyboardShortcut(.delete, modifiers: [.command, .shift])
