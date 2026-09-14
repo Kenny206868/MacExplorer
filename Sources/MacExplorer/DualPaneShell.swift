@@ -10,7 +10,6 @@ struct WindowWorkspaceShell: View {
         else { WorkspaceShell(workspace: workspace, tab: workspace.current) }
     }
 }
-
 struct DualPaneShell: View {
     @ObservedObject var controller: DualPaneController
     @EnvironmentObject private var preferences: PreferenceStore
@@ -42,7 +41,7 @@ struct DualPaneShell: View {
                         }
                     }.frame(maxHeight: .infinity)
                     ExplorerRule()
-                    transferBar(workspace: active, hidesAuxiliary: !auxiliary).frame(height: input.touchFriendly ? 54 : 40).explorerRegion("status")
+                    transferBar(workspace: active, hidesAuxiliary: !auxiliary, width: geometry.size.width).frame(height: input.touchFriendly ? 54 : 40).explorerRegion("status")
                 }.background(ExplorerDesign.canvas).foregroundStyle(ExplorerDesign.text)
                     .coordinateSpace(name: "Explorer.workspace")
                     .quickLookPreview(Binding(get: { controller.active.current.previewURL }, set: { controller.active.current.previewURL = $0 }))
@@ -51,8 +50,7 @@ struct DualPaneShell: View {
     }
     private func splitBrowsers(primary: ExplorerWorkspace) -> some View {
         GeometryReader { geometry in
-            let layout = DualPaneLayout(width: geometry.size.width, height: geometry.size.height,
-                preferred: controller.geometry.orientation, ratio: controller.geometry.ratio)
+            let layout = DualPaneLayout(width: geometry.size.width, height: geometry.size.height, preferred: controller.geometry.orientation, ratio: controller.geometry.ratio)
             Group {
                 if layout.orientation == .sideBySide {
                     HStack(spacing: 0) {
@@ -82,20 +80,24 @@ struct DualPaneShell: View {
             } else { ExplorerInspector(workspace: workspace, tab: workspace.current) }
         }.background(ExplorerDesign.canvas)
     }
-    private func transferBar(workspace: ExplorerWorkspace, hidesAuxiliary: Bool) -> some View {
+    private func transferBar(workspace: ExplorerWorkspace, hidesAuxiliary: Bool, width: CGFloat) -> some View {
         HStack(spacing: 10) {
-            Button { controller.focus(controller.geometry.focused.other, files: true) } label: { Label("Switch pane", systemImage: "arrow.left.arrow.right") }
-                .help("Tab switches file panes; each pane keeps its selection.")
+            Button { controller.focus(controller.geometry.focused.other, files: true) } label: { Label("Switch pane", systemImage: "arrow.left.arrow.right") }.help("Tab switches file panes; each pane keeps its selection.")
             Menu {
-                Picker("Pane orientation", selection: $controller.geometry.orientation) {
-                    Text("Side by Side").tag(PaneOrientation.sideBySide); Text("Stacked").tag(PaneOrientation.stacked)
-                }
+                Picker("Pane orientation", selection: $controller.geometry.orientation) { Text("Side by Side").tag(PaneOrientation.sideBySide); Text("Stacked").tag(PaneOrientation.stacked) }
                 Button("Equal Pane Sizes") { controller.geometry.ratio = 0.5 }
                 Button("Swap Locations") { controller.swapLocations() }
                 Button("Same Location in Other Pane") { controller.copyLocation(from: workspace) }
                 Divider(); Button("Close Dual Panes") { workspace.toggleDualPane() }
             } label: { Image(systemName: "rectangle.split.2x1").frame(width: input.target, height: input.target) }.menuStyle(.borderlessButton).menuIndicator(.hidden).help("Pane layout")
-            Spacer(minLength: 0)
+            if width >= 1100 {
+                HStack(spacing: 7) {
+                    Image(systemName: "arrow.right").font(.system(size: 10))
+                    Text(controller.other(than: workspace)?.destination.map { "Destination: " + $0.path } ?? "Open a destination folder in the other pane")
+                        .lineLimit(1).truncationMode(.middle)
+                }.font(.system(size: 10)).foregroundStyle(ExplorerDesign.muted).frame(maxWidth: .infinity, alignment: .leading)
+                    .help(controller.other(than: workspace)?.destination?.path ?? "No destination folder")
+            } else { Spacer(minLength: 0) }
             if hidesAuxiliary && (preferences.value.inspector || preferences.value.previewPane) {
                 Image(systemName: "sidebar.right").foregroundStyle(ExplorerDesign.muted).help("Auxiliary panes are preserved and appear when the window is at least 1540 points wide.")
             }
@@ -108,7 +110,6 @@ struct DualPaneShell: View {
         }.font(.system(size: 11)).buttonStyle(ExplorerButtonStyle()).padding(.horizontal, 12).background(ExplorerDesign.chrome)
     }
 }
-
 private struct DualFilePane: View {
     @ObservedObject var workspace: ExplorerWorkspace
     @ObservedObject var controller: DualPaneController
@@ -119,21 +120,19 @@ private struct DualFilePane: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            ExplorerRule()
+            PaneLocationBar(workspace: workspace)
             FilePromiseDropHost(workspace: workspace) {
                 VStack(spacing: 0) {
                     if !workspace.current.query.isEmpty { SearchControls(tab: workspace.current) }
-                    if let error = workspace.current.error {
-                        ContentUnavailableView("Location unavailable", systemImage: "folder.badge.questionmark", description: Text(error))
-                    } else { ExplorerContent(workspace: workspace, tab: workspace.current) }
+                    if let error = workspace.current.error { ContentUnavailableView("Location unavailable", systemImage: "folder.badge.questionmark", description: Text(error)) }
+                    else { ExplorerContent(workspace: workspace, tab: workspace.current) }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity).background(ExplorerDesign.canvas)
                     .onDrop(of: ["public.file-url"], isTargeted: nil) { providers in
                         guard let destination = workspace.destination else { return false }
                         return workspace.drop(providers, to: destination, move: NSEvent.modifierFlags.contains(.shift))
                     }
             }.frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
-            ExplorerRule()
-            footer
+            ExplorerRule(); footer
         }.frame(maxWidth: .infinity, maxHeight: .infinity).background(ExplorerDesign.canvas)
             .overlay(alignment: .top) { Rectangle().fill(active ? Color.accentColor : ExplorerDesign.separator).frame(height: active ? 2 : 1).allowsHitTesting(false) }
             .explorerRegion(side == .primary ? "pane.primary" : "pane.secondary")
@@ -146,6 +145,7 @@ private struct DualFilePane: View {
                 Text(side == .primary ? "1" : "2").font(.system(size: 10, weight: .bold)).frame(width: 22, height: 22)
                     .foregroundStyle(active ? Color.white : ExplorerDesign.muted)
                     .background(active ? Color.accentColor : ExplorerDesign.hover, in: RoundedRectangle(cornerRadius: 5))
+                    .frame(width: input.touchFriendly ? 44 : 22, height: input.touchFriendly ? 44 : 22).contentShape(Rectangle())
             }.buttonStyle(.plain).accessibilityLabel("Focus \(side == .primary ? "first" : "second") pane")
             Menu {
                 ForEach(workspace.tabs) { tab in
@@ -185,7 +185,6 @@ private struct DualFilePane: View {
             .buttonStyle(ExplorerButtonStyle()).frame(height: input.touchFriendly ? 48 : 27).background(ExplorerDesign.chrome)
     }
 }
-
 private struct DualPaneGrip: View {
     @ObservedObject var controller: DualPaneController
     let layout: DualPaneLayout
@@ -202,14 +201,12 @@ private struct DualPaneGrip: View {
                 let distance = horizontal ? value.translation.width : value.translation.height
                 controller.geometry.ratio = DualPaneLayout.normalizedRatio(((start ?? layout.first) + distance) / max(1, layout.extent))
             }.onEnded { _ in start = nil })
-            .onTapGesture(count: 2) { controller.geometry.ratio = 0.5 }
-            .onHover { hovered = $0 }
+            .onTapGesture(count: 2) { controller.geometry.ratio = 0.5 }.onHover { hovered = $0 }
             .onMoveCommand { direction in
                 if direction == .left || direction == .up { adjust(-0.05) }
                 else if direction == .right || direction == .down { adjust(0.05) }
             }
-            .accessibilityLabel("Resize file panes")
-            .accessibilityValue("\(Int(controller.geometry.ratio * 100)) percent to first pane")
+            .accessibilityLabel("Resize file panes").accessibilityValue("\(Int(controller.geometry.ratio * 100)) percent to first pane")
             .accessibilityAdjustableAction { adjust($0 == .increment ? 0.05 : -0.05) }
             .help("Drag to resize. Double-click for equal sizes. Arrow keys adjust a focused divider.")
     }

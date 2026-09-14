@@ -2,20 +2,21 @@ import SwiftUI
 import AppKit
 import ExplorerCore
 
-/// Real SwiftUI rows and headers with predictable column and selection styling.
 struct FileDetailsTable: View {
     @ObservedObject var workspace: ExplorerWorkspace
     @ObservedObject var tab: BrowserTab
     @ObservedObject private var columns = DetailsColumnStore.shared
     @EnvironmentObject private var preferences: PreferenceStore
     @State private var collapsed = Set<String>()
+    @State private var scrollbarGutter: CGFloat = 0
     @ObservedObject private var input = InputPreferences.shared
     var embedded = false
     var body: some View {
         GeometryReader { geometry in
             let visible = columns.value.visible
-            let widths = columns.value.widths(available: geometry.size.width)
-            let total = max(geometry.size.width, widths.reduce(0, +))
+            let available = max(0, geometry.size.width - scrollbarGutter)
+            let widths = columns.value.widths(available: available)
+            let total = max(available, widths.reduce(0, +))
             ScrollViewReader { proxy in
                 ScrollView([.horizontal, .vertical]) {
                     LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
@@ -38,6 +39,7 @@ struct FileDetailsTable: View {
                         }
                     }.frame(width: total).frame(minHeight: geometry.size.height, alignment: .top)
                         .background(ExplorerDesign.canvas).contentShape(Rectangle())
+                        .background(ScrollViewportMetrics { scrollbarGutter = $0 })
                         .contextMenu { FileContextMenu(workspace: workspace, urls: []) }
                 }.onChange(of: tab.focusedURL) { _, url in if let url { proxy.scrollTo(url) } }
                     .onChange(of: tab.options.group) { _, _ in collapsed = [] }
@@ -45,9 +47,7 @@ struct FileDetailsTable: View {
         }.accessibilityIdentifier("explorer.detailsTable")
     }
     private func groupHeader(_ title: String, count: Int) -> some View {
-        Button {
-            if collapsed.contains(title) { collapsed.remove(title) } else { collapsed.insert(title) }
-        } label: {
+        Button { if collapsed.contains(title) { collapsed.remove(title) } else { collapsed.insert(title) } } label: {
             HStack(spacing: 8) {
                 Image(systemName: collapsed.contains(title) ? "chevron.right" : "chevron.down").font(.system(size: 9, weight: .semibold))
                 Text(title).fontWeight(.semibold); Text("\(count)").foregroundStyle(ExplorerDesign.muted); Spacer()
@@ -73,8 +73,7 @@ private struct DetailsFileRow: View {
             .accessibilityAddTraits(selected ? [.isSelected, .isButton] : .isButton)
             .accessibilityAction { workspace.tapFile(entry.url, modifiers: []) }
             .accessibilityAction(named: Text("Open")) { workspace.activateFile(entry, doubleClick: true) }
-            .accessibilityAction(named: Text("More actions")) { workspace.showFileActions(for: entry) }
-            .help(entry.url.path)
+            .accessibilityAction(named: Text("More actions")) { workspace.showFileActions(for: entry) }.help(entry.url.path)
     }
     private var interaction: some View {
         surface.contentShape(Rectangle()).onHover { hovered = $0 }
@@ -89,10 +88,7 @@ private struct DetailsFileRow: View {
         }.font(.system(size: input.fileFontSize)).frame(height: input.rowHeight(compact: preferences.value.compact))
             .background(rowColor)
             .overlay(alignment: .bottom) { Rectangle().fill(ExplorerDesign.separator.opacity(0.42)).frame(height: 0.5) }
-            .overlay { focusOutline }
-    }
-    @ViewBuilder private var focusOutline: some View {
-        if tab.focusedURL == entry.url { Rectangle().stroke(Color.accentColor.opacity(0.6), lineWidth: 1).padding(1).allowsHitTesting(false) }
+            .overlay { if tab.focusedURL == entry.url { Rectangle().stroke(Color.accentColor.opacity(0.6), lineWidth: 1).padding(1).allowsHitTesting(false) } }
     }
     @ViewBuilder private func cell(_ column: DetailsColumn) -> some View {
         switch column {
@@ -106,8 +102,13 @@ private struct DetailsFileRow: View {
                 Text(displayName(entry, extensions: preferences.value.showExtensions)).lineLimit(1).truncationMode(.middle).foregroundStyle(ExplorerDesign.text)
                 if entry.isLocked { Image(systemName: "lock.fill").font(.system(size: 9)).foregroundStyle(ExplorerDesign.muted) }
             }
-        case .modified: Text(entry.modified.formatted(date: .abbreviated, time: .shortened)).lineLimit(1).foregroundStyle(ExplorerDesign.muted)
-        case .kind: Text(entry.kind).lineLimit(1).foregroundStyle(ExplorerDesign.muted)
+        case .modified:
+            ViewThatFits(in: .horizontal) {
+                Text(entry.modified.formatted(date: .abbreviated, time: .shortened)).fixedSize()
+                Text(entry.modified.formatted(date: .abbreviated, time: .omitted)).fixedSize()
+                Text(entry.modified.formatted(date: .numeric, time: .omitted)).fixedSize()
+            }.foregroundStyle(ExplorerDesign.muted).help(entry.modified.formatted(date: .complete, time: .standard))
+        case .kind: Text(entry.kind).lineLimit(1).foregroundStyle(ExplorerDesign.muted).help(entry.kind)
         case .size: Text(entry.sizeText).monospacedDigit().lineLimit(1).foregroundStyle(ExplorerDesign.muted)
         case .tags: Text(entry.tags.joined(separator: ", ")).lineLimit(1).foregroundStyle(ExplorerDesign.muted)
         case .availability:

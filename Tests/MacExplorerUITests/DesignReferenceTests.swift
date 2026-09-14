@@ -58,12 +58,11 @@ final class DesignReferenceTests: XCTestCase {
                 let bitmap = try XCTUnwrap(NSBitmapImageRep(data: Data(contentsOf: output.appendingPathComponent(captureName + ".png"))))
                 try assertColor(bitmap, point: CGPoint(x: 880, y: 22), rgb: dark ? 0x292B33 : 0xF7F7F9, label: captureName + " title chrome")
                 try assertColor(bitmap, point: CGPoint(x: 6, y: 510), rgb: dark ? 0x25272F : 0xF3F4F7, label: captureName + " sidebar")
-                // Scrollbar visibility follows the OS/input device. The left
-                // inner margin is canvas on both overlay and legacy scrollers.
                 try assertColor(bitmap, point: CGPoint(x: inspector.minX + 4, y: 735), rgb: dark ? 0x202228 : 0xFFFFFF, label: captureName + " inspector canvas")
                 if name == "details" {
                     let frame = try XCTUnwrap(geometry["files"]), index = try XCTUnwrap(tab.displayEntries.firstIndex { $0.url == entries[3].url })
-                    try assertColor(bitmap, point: CGPoint(x: frame.maxX - 5, y: frame.minY + 34 + CGFloat(index) * 36 + 18), rgb: dark ? 0x153E6D : 0xE4F0FF, label: captureName + " selected row")
+                    // Stay inside the row, outside native legacy scrollbar tracks.
+                    try assertColor(bitmap, point: CGPoint(x: frame.maxX - 26, y: frame.minY + 34 + CGFloat(index) * 36 + 18), rgb: dark ? 0x153E6D : 0xE4F0FF, label: captureName + " selected row")
                     try assertColor(bitmap, point: CGPoint(x: frame.minX + 35, y: 720), rgb: dark ? 0x202228 : 0xFFFFFF, label: captureName + " no empty zebra rows")
                 }
                 evidence.append(["capture": captureName, "geometry": "211 sidebar / 793 files / 254 inspector", "palette": "encoded sRGB surface and selection channels checked"])
@@ -76,8 +75,6 @@ final class DesignReferenceTests: XCTestCase {
         XCTAssertEqual(captures.count, 6)
     }
     @MainActor private func assertColor(_ bitmap: NSBitmapImageRep, point: CGPoint, rgb: Int, label: String) throws {
-        // Compare the encoded PNG's RGB channels, not an NSColor converted a
-        // second time through the legacy calibrated-RGB interpretation.
         XCTAssertEqual(bitmap.bitsPerSample, 8, label); XCTAssertFalse(bitmap.isPlanar, label)
         XCTAssertGreaterThanOrEqual(bitmap.samplesPerPixel, 3, label)
         let scale = CGFloat(bitmap.pixelsWide) / 1260
