@@ -1,9 +1,7 @@
 import SwiftUI
 import AppKit
 
-/// Native implementation of Design/index.html's semantic palette. Explicit
-/// surfaces avoid NSVisualEffectView choosing unrelated gray/white backgrounds.
-/// System accent, increased contrast and appearance remain user-controlled.
+/// Reference colors with system accent and high-contrast appearance support.
 enum ExplorerDesign {
     static let canvas = adaptive("canvas", 0xFFFFFF, 0x202228)
     static let chrome = adaptive("chrome", 0xF7F7F9, 0x292B33)
@@ -23,7 +21,6 @@ enum ExplorerDesign {
     static let sidebarWidth: CGFloat = 211
     static let inspectorWidth: CGFloat = 254
     static let rowHeight: CGFloat = 36
-
     private static func adaptive(_ name: String, _ light: UInt32, _ dark: UInt32) -> Color {
         Color(nsColor: NSColor(name: NSColor.Name("MacExplorer." + name)) { appearance in
             let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
@@ -48,7 +45,6 @@ enum ExplorerDesign {
         }
     }
 }
-
 struct ExplorerIconStyle: ButtonStyle {
     var selected = false
     func makeBody(configuration: Configuration) -> some View { LabelView(configuration: configuration, selected: selected) }
@@ -66,6 +62,7 @@ struct ExplorerIconStyle: ButtonStyle {
     }
 }
 struct CommandIcon: View {
+    @ObservedObject private var input = InputPreferences.shared
     let title: String
     let symbol: String
     var disabled: Bool
@@ -77,7 +74,7 @@ struct CommandIcon: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol).font(.system(size: 14, weight: .regular))
-                .frame(width: ExplorerDesign.iconTarget, height: ExplorerDesign.iconTarget).contentShape(Rectangle())
+                .frame(width: input.target, height: input.target).contentShape(Rectangle())
         }.buttonStyle(ExplorerIconStyle(selected: selected)).disabled(disabled).help(title).accessibilityLabel(title)
     }
 }
@@ -85,12 +82,13 @@ struct ExplorerButtonStyle: ButtonStyle {
     var primary = false
     func makeBody(configuration: Configuration) -> some View { ButtonBody(configuration: configuration, primary: primary) }
     private struct ButtonBody: View {
+        @ObservedObject private var input = InputPreferences.shared
         let configuration: ButtonStyle.Configuration
         let primary: Bool
         @Environment(\.isEnabled) private var enabled
         @State private var hovered = false
         var body: some View {
-            configuration.label.font(.system(size: 12, weight: .medium)).padding(.horizontal, 12).frame(minHeight: 32)
+            configuration.label.font(.system(size: 12, weight: .medium)).padding(.horizontal, 12).frame(minHeight: input.target)
                 .foregroundStyle(primary ? Color.white : ExplorerDesign.text)
                 .background(primary ? Color.accentColor : hovered ? ExplorerDesign.hover : ExplorerDesign.canvas, in: RoundedRectangle(cornerRadius: 6))
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(primary ? Color.clear : ExplorerDesign.separator, lineWidth: 1))
@@ -102,6 +100,7 @@ struct ExplorerRule: View {
     var body: some View { Rectangle().fill(ExplorerDesign.separator).frame(height: 1).accessibilityHidden(true) }
 }
 struct ExplorerMenuLabel: View {
+    @ObservedObject private var input = InputPreferences.shared
     let title: String
     let symbol: String
     var body: some View {
@@ -109,16 +108,12 @@ struct ExplorerMenuLabel: View {
             Image(systemName: symbol).font(.system(size: 14))
             Text(title).font(.system(size: 12))
             Image(systemName: "chevron.down").font(.system(size: 8, weight: .medium)).foregroundStyle(ExplorerDesign.muted)
-        }.padding(.horizontal, 8).frame(height: 32).contentShape(Rectangle())
+        }.padding(.horizontal, 8).frame(height: input.target).contentShape(Rectangle())
     }
 }
-
-/// Geometry is emitted by production components only in debug builds.
 struct ExplorerLayoutRegions: PreferenceKey {
     static var defaultValue: [String: CGRect] = [:]
-    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
-        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
-    }
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) { value.merge(nextValue(), uniquingKeysWith: { _, new in new }) }
 }
 extension View {
     @ViewBuilder func explorerRegion(_ name: String) -> some View {

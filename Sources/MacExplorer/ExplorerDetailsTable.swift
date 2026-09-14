@@ -9,6 +9,7 @@ struct FileDetailsTable: View {
     @ObservedObject private var columns = DetailsColumnStore.shared
     @EnvironmentObject private var preferences: PreferenceStore
     @State private var collapsed = Set<String>()
+    @ObservedObject private var input = InputPreferences.shared
     var embedded = false
     var body: some View {
         GeometryReader { geometry in
@@ -32,9 +33,8 @@ struct FileDetailsTable: View {
                                 ForEach(Array(visible.enumerated()), id: \.element) { index, column in
                                     DetailsColumnHeader(column: column, width: widths[index], tab: tab, store: columns)
                                 }
-                            }.frame(width: total, height: 34).background(ExplorerDesign.canvas)
-                                .overlay(alignment: .bottom) { ExplorerRule() }
-                                .explorerRegion("details.header")
+                            }.frame(width: total, height: input.headerHeight).background(ExplorerDesign.canvas)
+                                .overlay(alignment: .bottom) { ExplorerRule() }.explorerRegion("details.header")
                         }
                     }.frame(width: total).frame(minHeight: geometry.size.height, alignment: .top)
                         .background(ExplorerDesign.canvas).contentShape(Rectangle())
@@ -51,7 +51,7 @@ struct FileDetailsTable: View {
             HStack(spacing: 8) {
                 Image(systemName: collapsed.contains(title) ? "chevron.right" : "chevron.down").font(.system(size: 9, weight: .semibold))
                 Text(title).fontWeight(.semibold); Text("\(count)").foregroundStyle(ExplorerDesign.muted); Spacer()
-            }.font(.system(size: 11)).padding(.horizontal, 14).frame(height: 34).background(ExplorerDesign.chrome)
+            }.font(.system(size: 11)).padding(.horizontal, 14).frame(height: input.headerHeight).background(ExplorerDesign.chrome)
         }.buttonStyle(.plain).accessibilityLabel(title + ", \(count) items")
     }
 }
@@ -63,22 +63,21 @@ private struct DetailsFileRow: View {
     let widths: [Double]
     @EnvironmentObject private var preferences: PreferenceStore
     @State private var hovered = false
+    @ObservedObject private var input = InputPreferences.shared
     private var selected: Bool { tab.selection.contains(entry.url) }
     private var menuURLs: [URL] { selected ? workspace.selectedURLs : [entry.url] }
     private var rowColor: Color { selected ? ExplorerDesign.selection : hovered ? ExplorerDesign.hover.opacity(0.65) : ExplorerDesign.canvas }
     var body: some View {
-        interaction
-            .accessibilityElement(children: .ignore)
+        interaction.accessibilityElement(children: .ignore)
             .accessibilityLabel(entry.name + ", " + entry.kind + ", " + entry.sizeText)
             .accessibilityAddTraits(selected ? [.isSelected, .isButton] : .isButton)
-            .accessibilityAction { workspace.select(entry.url, extend: false, range: false) }
-            .accessibilityAction(named: Text("Open")) { workspace.open(entry) }
+            .accessibilityAction { workspace.tapFile(entry.url, modifiers: []) }
+            .accessibilityAction(named: Text("Open")) { workspace.activateFile(entry, doubleClick: true) }
+            .accessibilityAction(named: Text("More actions")) { workspace.showFileActions(for: entry) }
             .help(entry.url.path)
     }
     private var interaction: some View {
         surface.contentShape(Rectangle()).onHover { hovered = $0 }
-            .onTapGesture(count: 2) { workspace.open(entry) }
-            .onTapGesture(perform: select)
             .modifier(FileInteractionModifier(entry: entry, workspace: workspace, tab: tab))
             .contextMenu { FileContextMenu(workspace: workspace, urls: menuURLs) }
     }
@@ -87,7 +86,7 @@ private struct DetailsFileRow: View {
             ForEach(Array(columns.enumerated()), id: \.element) { index, column in
                 cell(column).padding(.horizontal, 12).frame(width: widths[index], alignment: column == .size ? .trailing : .leading)
             }
-        }.font(.system(size: 12)).frame(height: preferences.value.compact ? 28 : ExplorerDesign.rowHeight)
+        }.font(.system(size: input.fileFontSize)).frame(height: input.rowHeight(compact: preferences.value.compact))
             .background(rowColor)
             .overlay(alignment: .bottom) { Rectangle().fill(ExplorerDesign.separator.opacity(0.42)).frame(height: 0.5) }
             .overlay { focusOutline }
@@ -95,16 +94,13 @@ private struct DetailsFileRow: View {
     @ViewBuilder private var focusOutline: some View {
         if tab.focusedURL == entry.url { Rectangle().stroke(Color.accentColor.opacity(0.6), lineWidth: 1).padding(1).allowsHitTesting(false) }
     }
-    private func select() {
-        workspace.select(entry.url, extend: !NSEvent.modifierFlags.intersection([.command, .control]).isEmpty, range: NSEvent.modifierFlags.contains(.shift))
-        if preferences.value.singleClickOpen { workspace.open(entry) }
-    }
     @ViewBuilder private func cell(_ column: DetailsColumn) -> some View {
         switch column {
         case .name:
             HStack(spacing: 10) {
-                if preferences.value.checkboxes {
-                    Toggle("Select " + entry.name, isOn: Binding(get: { selected }, set: { _ in workspace.select(entry.url, extend: true, range: false) })).labelsHidden().toggleStyle(.checkbox)
+                if preferences.value.checkboxes || workspace.touchSelecting {
+                    Toggle("Select " + entry.name, isOn: Binding(get: { selected }, set: { _ in workspace.select(entry.url, extend: true, range: false) }))
+                        .labelsHidden().toggleStyle(.checkbox).frame(minWidth: input.touchFriendly ? 36 : nil, minHeight: input.touchFriendly ? 40 : nil)
                 }
                 FileThumbnail(entry: entry, size: 20)
                 Text(displayName(entry, extensions: preferences.value.showExtensions)).lineLimit(1).truncationMode(.middle).foregroundStyle(ExplorerDesign.text)
@@ -127,19 +123,19 @@ private struct DetailsColumnHeader: View {
     @ObservedObject var store: DetailsColumnStore
     @State private var initial: Double?
     @State private var targeted = false
+    @ObservedObject private var input = InputPreferences.shared
     var body: some View {
         Button(action: sort) {
             HStack(spacing: 5) {
                 Text(column.title).lineLimit(1)
                 if column.sort == tab.options.sort { Image(systemName: tab.options.descending ? "arrow.down" : "arrow.up").font(.system(size: 8)) }
                 Spacer(minLength: 0)
-            }.font(.system(size: 10)).foregroundStyle(ExplorerDesign.muted).padding(.horizontal, 12).frame(height: 34)
+            }.font(.system(size: 10)).foregroundStyle(ExplorerDesign.muted).padding(.horizontal, 12).frame(height: input.headerHeight)
                 .background(targeted ? ExplorerDesign.selection : ExplorerDesign.canvas)
         }.buttonStyle(.plain).frame(width: width)
             .onDrag { store.begin(column) }
             .onDrop(of: [DetailsColumnStore.dragType], isTargeted: $targeted) { store.accept($0, before: column) }
-            .overlay(alignment: .trailing) { resizeHandle }
-            .contextMenu { columnMenu }
+            .overlay(alignment: .trailing) { resizeHandle }.contextMenu { columnMenu }
             .accessibilityLabel(column.title + (column.sort == tab.options.sort ? (tab.options.descending ? ", sorted descending" : ", sorted ascending") : ""))
     }
     private var resizeHandle: some View {
@@ -148,8 +144,7 @@ private struct DetailsColumnHeader: View {
             .gesture(DragGesture(minimumDistance: 2, coordinateSpace: .global)
                 .onChanged { gesture in if initial == nil { initial = width }; store.value.setWidth((initial ?? width) + gesture.translation.width, for: column) }
                 .onEnded { _ in initial = nil; store.save() })
-            .onTapGesture(count: 2, perform: sizeToFit)
-            .accessibilityLabel("Resize " + column.title)
+            .onTapGesture(count: 2, perform: sizeToFit).accessibilityLabel("Resize " + column.title)
             .accessibilityAdjustableAction { direction in store.value.setWidth(width + (direction == .increment ? 20 : -20), for: column); store.save() }
     }
     private var columnMenu: some View {

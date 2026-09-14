@@ -3,7 +3,6 @@ import AppKit
 import ImageIO
 import ExplorerCore
 
-/// An immutable CGImage is safe to share; no mutable image source crosses actors.
 private final class GalleryRaster: @unchecked Sendable {
     let image: CGImage
     init(_ image: CGImage) { self.image = image }
@@ -25,12 +24,10 @@ private actor GalleryRasterCache {
                 kCGImageSourceThumbnailMaxPixelSize: 2048
               ] as CFDictionary) else { throw ExplorerError.message("Use Quick Look to preview this image format.") }
         try Task.checkCancellation()
-        let raster = GalleryRaster(image)
-        cache.setObject(raster, forKey: key, cost: image.bytesPerRow * image.height)
+        let raster = GalleryRaster(image); cache.setObject(raster, forKey: key, cost: image.bytesPerRow * image.height)
         return raster
     }
 }
-
 struct FileGalleryView: View {
     @ObservedObject var workspace: ExplorerWorkspace
     @ObservedObject var tab: BrowserTab
@@ -54,26 +51,21 @@ struct FileGalleryView: View {
                     CommandIcon("Next item", "chevron.right", disabled: index + 1 >= files.count) { step(1) }
                     CommandIcon("Open in Quick Look", "arrow.up.left.and.arrow.down.right") { tab.previewURL = entry.url }
                 }.padding(.horizontal, 18).frame(height: 60)
-                Divider()
+                ExplorerRule()
                 Group {
                     if entry.canBrowse {
                         VStack(spacing: 20) {
-                            FileThumbnail(entry: entry, size: 128)
-                            Text(entry.name).font(.title3).lineLimit(2)
-                            Button("Open Folder") { workspace.open(entry) }.buttonStyle(.borderedProminent)
+                            FileThumbnail(entry: entry, size: 128); Text(entry.name).font(.title3).lineLimit(2)
+                            Button("Open Folder") { workspace.open(entry) }.buttonStyle(ExplorerButtonStyle(primary: true))
                         }.frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else if !entry.isDownloaded {
-                        ContentUnavailableView("Available online", systemImage: "icloud.and.arrow.down", description: Text("Download this file before previewing it."))
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        ContentUnavailableView("Available online", systemImage: "icloud.and.arrow.down", description: Text("Download this file before previewing it.")).frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else if entry.isImage { GalleryImageCanvas(entry: entry).id(entry.url) }
                     else { NativePreview(url: entry.url).padding(18).frame(maxWidth: .infinity, maxHeight: .infinity) }
                 }.background(ExplorerDesign.surface.opacity(0.28))
                     .contextMenu { FileContextMenu(workspace: workspace, urls: tab.selection.contains(entry.url) ? workspace.selectedURLs : [entry.url]) }
-                Divider()
-                filmstrip
-            } else {
-                ContentUnavailableView("No files to preview", systemImage: "photo.on.rectangle").frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+                ExplorerRule(); filmstrip
+            } else { ContentUnavailableView("No files to preview", systemImage: "photo.on.rectangle").frame(maxWidth: .infinity, maxHeight: .infinity) }
         }.onAppear { tab.gridColumns = 1 }.accessibilityIdentifier("explorer.gallery")
     }
     private var filmstrip: some View {
@@ -82,21 +74,16 @@ struct FileGalleryView: View {
                 LazyHStack(spacing: 8) {
                     ForEach(files) { entry in
                         VStack(spacing: 8) {
-                            FileThumbnail(entry: entry, size: 62)
-                            Text(entry.name).font(.system(size: 10)).lineLimit(1)
+                            FileThumbnail(entry: entry, size: 62); Text(entry.name).font(.system(size: 10)).lineLimit(1)
                         }.frame(width: 92, height: 92).padding(6)
-                            .background(tab.selection.contains(entry.url) ? Color.accentColor.opacity(0.13) : .clear, in: RoundedRectangle(cornerRadius: 9))
+                            .background(tab.selection.contains(entry.url) ? ExplorerDesign.selection : .clear, in: RoundedRectangle(cornerRadius: 9))
                             .overlay(RoundedRectangle(cornerRadius: 9).stroke(entry.url == active?.url ? Color.accentColor : .clear, lineWidth: 1.5))
                             .contentShape(Rectangle()).id(entry.url)
-                            .onTapGesture(count: 2) { workspace.open(entry) }
-                            .onTapGesture {
-                                workspace.select(entry.url, extend: !NSEvent.modifierFlags.intersection([.command, .control]).isEmpty, range: NSEvent.modifierFlags.contains(.shift))
-                            }
                             .modifier(FileInteractionModifier(entry: entry, workspace: workspace, tab: tab))
                             .contextMenu { FileContextMenu(workspace: workspace, urls: tab.selection.contains(entry.url) ? workspace.selectedURLs : [entry.url]) }
                             .accessibilityElement(children: .ignore).accessibilityLabel(entry.name)
                             .accessibilityAddTraits(tab.selection.contains(entry.url) ? [.isButton, .isSelected] : .isButton)
-                            .accessibilityAction { workspace.select(entry.url, extend: false, range: false) }
+                            .accessibilityAction { workspace.tapFile(entry.url, modifiers: []) }
                     }
                 }.padding(.horizontal, 16).padding(.vertical, 12)
             }.frame(height: 138)
@@ -105,12 +92,10 @@ struct FileGalleryView: View {
         }
     }
     private func step(_ offset: Int) {
-        let next = index + offset
-        guard files.indices.contains(next) else { return }
-        workspace.select(files[next].url, extend: false, range: false)
+        let next = index + offset; guard files.indices.contains(next) else { return }
+        workspace.activatePane(); workspace.select(files[next].url, extend: false, range: false)
     }
 }
-
 private struct GalleryImageCanvas: View {
     let entry: FileEntry
     @State private var raster: GalleryRaster?
@@ -118,6 +103,7 @@ private struct GalleryImageCanvas: View {
     @State private var zoom = 1.0
     @State private var turns = 0
     @GestureState private var magnification = 1.0
+    @ObservedObject private var input = InputPreferences.shared
     var body: some View {
         VStack(spacing: 0) {
             GeometryReader { proxy in
@@ -130,24 +116,21 @@ private struct GalleryImageCanvas: View {
                     ScrollView([.horizontal, .vertical]) {
                         Image(decorative: raster.image, scale: 1).resizable().interpolation(.high)
                             .frame(width: CGFloat(raster.image.width) * scale, height: CGFloat(raster.image.height) * scale)
-                            .rotationEffect(.degrees(Double(turns * 90)))
-                            .frame(width: width * scale, height: height * scale)
+                            .rotationEffect(.degrees(Double(turns * 90))).frame(width: width * scale, height: height * scale)
                             .padding(24).frame(minWidth: proxy.size.width, minHeight: proxy.size.height)
-                    }.simultaneousGesture(MagnifyGesture().updating($magnification) { value, state, _ in state = value.magnification }
-                        .onEnded { zoom = min(8, max(1, zoom * $0.magnification)) })
+                    }.simultaneousGesture(MagnifyGesture().updating($magnification) { value, state, _ in if input.gesturesEnabled { state = value.magnification } }
+                        .onEnded { if input.gesturesEnabled { zoom = min(8, max(1, zoom * $0.magnification)) } })
                         .accessibilityLabel("Image preview: " + entry.name)
-                } else if failed {
-                    NativePreview(url: entry.url).frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else { ProgressView("Loading preview…").frame(maxWidth: .infinity, maxHeight: .infinity) }
+                } else if failed { NativePreview(url: entry.url).frame(maxWidth: .infinity, maxHeight: .infinity) }
+                else { ProgressView("Loading preview…").frame(maxWidth: .infinity, maxHeight: .infinity) }
             }
             HStack(spacing: 8) {
-                Text("Preview only").font(.caption).foregroundStyle(.secondary)
-                Spacer()
+                Text("Preview only").font(.caption).foregroundStyle(.secondary); Spacer()
                 CommandIcon("Zoom out", "minus.magnifyingglass", disabled: zoom <= 1 || raster == nil) { zoom = max(1, zoom / 1.5) }
-                Button(zoom == 1 ? "Fit" : String(format: "%.0f%%", zoom * 100)) { zoom = 1 }.font(.caption).frame(width: 46).help("Fit image to view")
+                Button(zoom == 1 ? "Fit" : String(format: "%.0f%%", zoom * 100)) { zoom = 1 }.font(.caption).frame(width: 46, height: input.target).help("Fit image to view")
                 CommandIcon("Zoom in", "plus.magnifyingglass", disabled: zoom >= 8 || raster == nil) { zoom = min(8, zoom * 1.5) }
                 CommandIcon("Rotate preview clockwise", "rotate.right", disabled: raster == nil) { turns = (turns + 1) % 4 }
-            }.padding(.horizontal, 16).frame(height: 40)
+            }.padding(.horizontal, 16).frame(height: input.touchFriendly ? 52 : 40)
         }.task(id: entry.modified) {
             raster = nil; failed = false
             do { let image = try await GalleryRasterCache.shared.image(for: entry); if !Task.isCancelled { raster = image } }

@@ -12,24 +12,26 @@ struct FileDragAnchor: NSViewRepresentable {
         let view = FileDragAnchorView(); updateNSView(view, context: context)
         FileDragRouter.shared.register(view); return view
     }
-    func updateNSView(_ view: FileDragAnchorView, context: Context) {
-        view.url = url; view.workspace = workspace; view.tab = tab
-    }
-    static func dismantleNSView(_ view: FileDragAnchorView, coordinator: ()) {
-        FileDragRouter.shared.unregister(view)
-    }
+    func updateNSView(_ view: FileDragAnchorView, context: Context) { view.url = url; view.workspace = workspace; view.tab = tab }
+    static func dismantleNSView(_ view: FileDragAnchorView, coordinator: ()) { FileDragRouter.shared.unregister(view) }
 }
-
 @MainActor final class FileDragAnchorView: NSView, NSDraggingSource {
     var url: URL?
     weak var workspace: ExplorerWorkspace?
     weak var tab: BrowserTab?
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override var isFlipped: Bool { true }
+    /// Shared by the real drag session and headless native integration tests.
+    func prepareEntries() -> [FileEntry] {
+        guard let url, let tab, let workspace, workspace.current.id == tab.id,
+              tab.displayEntries.contains(where: { $0.url == url }) else { return [] }
+        workspace.activatePane(files: true)
+        if !tab.selection.contains(url) { workspace.select(url, extend: false, range: false) }
+        return tab.selectedEntries
+    }
     func begin(_ event: NSEvent) -> Bool {
         guard let url, let tab, let workspace, workspace.current.id == tab.id else { return false }
-        if !tab.selection.contains(url) { workspace.select(url, extend: false, range: false) }
-        let entries = tab.displayEntries.filter { tab.selection.contains($0.url) }
+        let entries = prepareEntries()
         guard !entries.isEmpty else { return false }
         let point = convert(event.locationInWindow, from: nil)
         let fallbackIcon = NSWorkspace.shared.icon(forFile: url.path)
@@ -37,16 +39,14 @@ struct FileDragAnchor: NSViewRepresentable {
         do { providers = try entries.map { try ExplorerFilePromiseProvider.make(for: $0) } }
         catch { workspace.fail("Drag unavailable", error.localizedDescription); return false }
         let items = providers.enumerated().map { index, provider -> NSDraggingItem in
-            let url = entries[index].url
-            let item = NSDraggingItem(pasteboardWriter: provider)
+            let url = entries[index].url, item = NSDraggingItem(pasteboardWriter: provider)
             let offset = CGFloat(min(index, 5)) * 3
             item.setDraggingFrame(CGRect(x: point.x + offset, y: point.y + offset, width: 36, height: 36),
                                   contents: index < 8 ? NSWorkspace.shared.icon(forFile: url.path) : fallbackIcon)
             return item
         }
         let session = beginDraggingSession(with: Array(items), event: event, source: self)
-        session.draggingFormation = .pile
-        session.animatesToStartingPositionsOnCancelOrFail = true
+        session.draggingFormation = .pile; session.animatesToStartingPositionsOnCancelOrFail = true
         return true
     }
     func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
@@ -58,7 +58,6 @@ struct FileDragAnchor: NSViewRepresentable {
         FileDragRouter.shared.endSession(); tab?.refresh()
     }
 }
-
 @MainActor final class FileDragRouter {
     static let shared = FileDragRouter()
     private let anchors = NSHashTable<FileDragAnchorView>.weakObjects()
@@ -68,16 +67,13 @@ struct FileDragAnchor: NSViewRepresentable {
     private var origin = NSPoint.zero
     private var activeSource: FileDragAnchorView?
     func register(_ view: FileDragAnchorView) {
-        anchors.add(view)
-        guard monitor == nil else { return }
+        anchors.add(view); guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]) { event in
-            let consumed = MainActor.assumeIsolated { self.handle(event) == nil }
-            return consumed ? nil : event
+            let consumed = MainActor.assumeIsolated { self.handle(event) == nil }; return consumed ? nil : event
         }
     }
     func unregister(_ view: FileDragAnchorView) {
-        anchors.remove(view)
-        if candidate === view { candidate = nil }
+        anchors.remove(view); if candidate === view { candidate = nil }
         if anchors.allObjects.isEmpty, activeSource == nil { removeMonitor() }
     }
     func folder(at point: NSPoint, in window: NSWindow?, workspace: ExplorerWorkspace) -> URL? {
@@ -96,9 +92,7 @@ struct FileDragAnchor: NSViewRepresentable {
     private func handle(_ event: NSEvent) -> NSEvent? {
         switch event.type {
         case .leftMouseDown:
-            candidate = nil
-            guard event.window?.attachedSheet == nil,
-                  !(event.window?.firstResponder is NSTextView) else { return event }
+            candidate = nil; guard event.window?.attachedSheet == nil else { return event }
             origin = event.locationInWindow
             candidate = anchors.allObjects.first { view in
                 guard view.window === event.window, !view.isHiddenOrHasHiddenAncestor else { return false }
@@ -109,15 +103,13 @@ struct FileDragAnchor: NSViewRepresentable {
             guard activeSource == nil, let candidate, candidate.window === event.window,
                   candidate.url == candidateURL, hypot(event.locationInWindow.x - origin.x, event.locationInWindow.y - origin.y) >= 5 else { return event }
             activeSource = candidate; self.candidate = nil
-            if candidate.begin(event) { return nil }
-            activeSource = nil
+            if candidate.begin(event) { return nil }; activeSource = nil
         case .leftMouseUp: candidate = nil
         default: break
         }
         return event
     }
 }
-
 @MainActor final class SpringFolderTarget: ObservableObject {
     @Published var highlighted = false
     private var task: Task<Void, Never>?
@@ -134,7 +126,6 @@ struct FileDragAnchor: NSViewRepresentable {
     func cancel() { task?.cancel(); task = nil; highlighted = false }
     deinit { task?.cancel() }
 }
-
 struct SpringFolderDrop: DropDelegate {
     let folder: URL?
     let workspace: ExplorerWorkspace
@@ -148,7 +139,6 @@ struct SpringFolderDrop: DropDelegate {
         return workspace.drop(info.itemProviders(for: ["public.file-url"]), to: folder, move: NSEvent.modifierFlags.contains(.shift))
     }
 }
-
 struct FileInteractionModifier: ViewModifier {
     let entry: FileEntry
     let workspace: ExplorerWorkspace
@@ -156,7 +146,8 @@ struct FileInteractionModifier: ViewModifier {
     @StateObject private var target = SpringFolderTarget()
     @ObservedObject private var clipboard = FileClipboard.shared
     func body(content: Content) -> some View {
-        content.opacity(clipboard.isCut(entry.url) ? 0.5 : 1)
+        content.modifier(FileActivation(entry: entry, workspace: workspace))
+            .opacity(clipboard.isCut(entry.url) ? 0.5 : 1)
             .background(FileDragAnchor(url: entry.url, workspace: workspace, tab: tab))
             .overlay(RoundedRectangle(cornerRadius: 6).stroke(target.highlighted ? Color.accentColor : .clear, lineWidth: 2).allowsHitTesting(false))
             .onDrop(of: ["public.file-url"], delegate: SpringFolderDrop(folder: entry.canBrowse ? entry.url : nil, workspace: workspace, target: target))
