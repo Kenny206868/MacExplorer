@@ -15,8 +15,6 @@ permissions:
   contents: read
 jobs:
   universal:
-    # Both supported standard pools produce the same arm64+x86_64 universal app.
-    # Use MACOS_BUILD_RUNNER=macos-15 to execute tests natively on Apple Silicon.
     runs-on: ${{ vars.MACOS_BUILD_RUNNER || 'macos-15-intel' }}
     timeout-minutes: 45
     steps:
@@ -32,6 +30,10 @@ jobs:
         run: swift package resolve
       - name: Core tests
         run: swift test --parallel --filter ExplorerCoreTests
+      - name: Durable journal and real subprocess crash recovery tests
+        run: |
+          swift build --product RecoveryCrashProbe
+          swift test --filter ExplorerJournalTests
       - name: Build universal app, ZIP, and DMG
         env:
           VERSION: ${{ inputs.version }}
