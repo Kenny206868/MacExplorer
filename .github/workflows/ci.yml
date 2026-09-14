@@ -6,11 +6,26 @@ on:
 permissions:
   contents: read
 concurrency:
-  # Main commits finish their immutable alpha evidence even while development
-  # continues. New PR revisions still cancel their obsolete PR run.
-  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  # Explicit milestones finish even when the next edit is pushed; ordinary
+  # integration runs collapse to the newest branch revision.
+  group: ci-${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[alpha]') && github.sha || github.ref }}
   cancel-in-progress: true
 jobs:
+  prioritize:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Retire superseded integration runs, preserving alpha milestones
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/prioritize-ci.py
   native:
     uses: ./.github/workflows/build.yml
     with:
@@ -29,3 +44,4 @@ jobs:
           python3 -m py_compile scripts/*.py
           VERSION=0.1.0 python3 scripts/make-info.py /tmp/MacExplorer-Info.plist
           python3 scripts/check-design.py
+          python3 -m unittest discover -s scripts -p 'test_*.py'
