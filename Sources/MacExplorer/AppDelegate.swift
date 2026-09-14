@@ -16,8 +16,6 @@ import ExplorerCore
         NSUpdateDynamicServices()
         let arguments = CommandLine.arguments.dropFirst().filter { !$0.hasPrefix("-") }
         AppRouter.shared.pending += arguments.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
-        // Local, app-window-only event routing implements Explorer's F2/F5/Delete conventions.
-        // It never installs a global event tap or records keyboard input.
         keyboardMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in MainActor.assumeIsolated { KeyboardRouter.handle(event) } }
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -47,28 +45,61 @@ import ExplorerCore
 
 @MainActor enum KeyboardRouter {
     static func handle(_ event: NSEvent) -> NSEvent? {
-        guard let workspace = AppRouter.shared.active, event.window == workspace.window, workspace.sheet == nil, workspace.conflict == nil else { return event }
+        guard let workspace = AppRouter.shared.active, event.window == workspace.window,
+              workspace.sheet == nil, workspace.conflict == nil, workspace.message == nil,
+              workspace.pendingDeletion.isEmpty, event.window?.attachedSheet == nil else { return event }
+        // Text entry, including IME composition, is owned by the first responder.
         if event.window?.firstResponder is NSTextView || event.window?.firstResponder is NSTextField { return event }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let shift = flags.contains(.shift), control = flags.contains(.control)
         if flags.contains(.option) {
-            switch event.keyCode { case 123: workspace.current.back(); return nil; case 124: workspace.current.forward(); return nil; case 126: workspace.current.up(); return nil; default: break }
+            switch event.keyCode {
+            case 123: workspace.current.back(); return nil
+            case 124: workspace.current.forward(); return nil
+            case 126: workspace.current.up(); return nil
+            case 36, 76: workspace.sheet = .properties; return nil
+            default: if event.charactersIgnoringModifiers?.lowercased() == "d" { workspace.addressFocused = true; return nil }
+            }
+            return event
         }
-        if flags.contains(.control), !flags.contains(.command) {
+        if control && !flags.contains(.command) {
+            if event.keyCode == 48 { workspace.cycleTab(backward: shift); return nil }
+            if event.keyCode == 49 { workspace.toggleFocusedSelection(); return nil }
+            if [123, 124, 125, 126, 115, 119].contains(event.keyCode) {
+                workspace.keyboardMove(event.keyCode, shift: shift, control: true); return nil
+            }
             switch event.charactersIgnoringModifiers?.lowercased() {
-            case "c": workspace.copy(); case "x": workspace.copy(cut: true); case "v": workspace.paste(); case "a": workspace.selectAll(); case "z": workspace.operations.undo(redo: flags.contains(.shift)); case "t": workspace.newTab(); case "w": workspace.closeTab(workspace.activeID); case "l": workspace.addressFocused = true; case "f": workspace.searchFocused = true; default: return event
+            case "c": workspace.copy()
+            case "x": workspace.copy(cut: true)
+            case "v": workspace.paste()
+            case "a": workspace.selectAll()
+            case "z": workspace.operations.undo(redo: shift)
+            case "y": workspace.operations.undo(redo: true)
+            case "t": if shift { workspace.reopenClosedTab() } else { workspace.newTab() }
+            case "w": workspace.closeTab(workspace.activeID)
+            case "l": workspace.addressFocused = true
+            case "f": workspace.searchFocused = true
+            default: return event
             }
             return nil
         }
-        guard !flags.contains(.command), !flags.contains(.control) else { return event }
+        guard !flags.contains(.command), !control else { return event }
         switch event.keyCode {
         case 120: if !workspace.selected.isEmpty { workspace.sheet = .rename }; return nil
+        case 99: workspace.searchFocused = true; return nil
         case 96: workspace.current.refresh(); return nil
-        case 51, 117: workspace.delete(permanent: flags.contains(.shift)); return nil
+        case 51, 117: workspace.delete(permanent: shift); return nil
         case 49: workspace.quickLook(); return nil
         case 36, 76: workspace.openSelection(); return nil
-        case 125 where workspace.current.options.view != .details: workspace.moveSelection(1, extend: flags.contains(.shift)); return nil
-        case 126 where workspace.current.options.view != .details: workspace.moveSelection(-1, extend: flags.contains(.shift)); return nil
-        default: return event
+        case 115, 119, 123, 124, 125, 126:
+            workspace.keyboardMove(event.keyCode, shift: shift, control: false); return nil
+        case 53: workspace.current.selection = []; workspace.current.typeAhead.reset(); return nil
+        default:
+            if let text = event.characters, !text.isEmpty,
+               !text.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) || (0xF700...0xF8FF).contains($0.value) }) {
+                workspace.typeAhead(text, time: event.timestamp); return nil
+            }
+            return event
         }
     }
 }
