@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Validate native snapshot coverage and produce an offline review gallery.
-
-Uses PNG headers and the renderer's sampled luminance metrics. This is a render
-and coverage gate, not a claim of pixel-baseline or full accessibility parity.
-"""
+"""Validate native coverage, dimensions and compositing; build an offline gallery."""
 import argparse
 import hashlib
 import html
@@ -36,14 +32,16 @@ def validate(root: pathlib.Path) -> dict:
         scale = width / item['width']
         if scale not in (1, 2) or height != item['height'] * scale:
             raise ValueError(f'Unexpected render dimensions: {name}')
+        if item.get('minimumAlpha', 0) < 0.99:
+            raise ValueError(f'Uncomposited transparent render: {name}')
         if item['luminanceRange'] <= 0.15 or item['distinctSamples'] <= 12:
             raise ValueError(f'Blank or incomplete render: {name}')
         checksums[name + '.png'] = hashlib.sha256(data).hexdigest()
         label = html.escape(name)
         cards.append(f'<article><h2>{label}</h2><a href="{label}.png"><img loading="lazy" src="{label}.png" alt="Native {label} capture" width="{width}" height="{height}"></a></article>')
-    page = '''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>MacExplorer native visual review</title><style>body{font:14px system-ui;margin:32px;background:#17191d;color:#eef0f4}header{max-width:900px;margin-bottom:30px}main{display:grid;grid-template-columns:repeat(auto-fit,minmax(500px,1fr));gap:24px}article{min-width:0}h2{font-size:14px}img{width:100%;height:auto;border:1px solid #454951;border-radius:10px}a{color:inherit}</style><header><h1>MacExplorer · native visual review</h1><p>Production SwiftUI views rendered by macOS AppKit. Fixed fixture data, light/dark themes and responsive widths. Click a capture for full resolution. This report checks coverage, bitmap dimensions and nonblank rendering; a passing report alone is not a pixel-baseline or accessibility certification.</p></header><main>'''
+    page = '''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>MacExplorer native visual review</title><style>body{font:14px system-ui;margin:32px;background:#17191d;color:#eef0f4}header{max-width:900px;margin-bottom:30px}main{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(500px,100%),1fr));gap:24px}article{min-width:0}h2{font-size:14px}img{width:100%;height:auto;border:1px solid #454951;border-radius:10px}a{color:inherit}</style><header><h1>MacExplorer · native visual review</h1><p>Production SwiftUI views rendered by macOS AppKit. Fixed fixture data, light/dark themes and responsive widths. Click a capture for full resolution. This report checks coverage, dimensions, compositing and nonblank rendering; it is not a pixel-baseline or accessibility certification.</p></header><main>'''
     (root / 'index.html').write_text(page + ''.join(cards) + '</main></html>')
-    report = {'schemaVersion': 1, 'captures': len(captures), 'sha256': checksums, 'checks': ['coverage', 'PNG dimensions', 'nonblank rendering']}
+    report = {'schemaVersion': 1, 'captures': len(captures), 'sha256': checksums, 'checks': ['coverage', 'PNG dimensions', 'nonblank rendering', 'opaque compositing']}
     (root / 'validation.json').write_text(json.dumps(report, indent=2) + '\n')
     return report
 
