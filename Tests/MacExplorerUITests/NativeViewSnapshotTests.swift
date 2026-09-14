@@ -134,52 +134,6 @@ final class NativeViewSnapshotTests: XCTestCase {
     }
 
     @MainActor private func capture(_ content: AnyView, named name: String, size: NSSize, dark: Bool, output: URL) async throws -> Capture {
-        // Fixed viewport and explicit compositing keep intrinsic-size sheets and
-        // transparent materials from producing misleading PNG measurements.
-        let host = NSHostingView(rootView: content
-            .frame(width: size.width, height: size.height)
-            .background(Color(nsColor: .windowBackgroundColor))
-            .environment(\.colorScheme, dark ? .dark : .light)
-            .environment(\.locale, Locale(identifier: "en_US_POSIX"))
-            .environment(\.timeZone, TimeZone(secondsFromGMT: 0)!)
-            .transaction { $0.animation = nil })
-        let window = SnapshotWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
-        window.backgroundColor = dark ? NSColor(calibratedWhite: 0.11, alpha: 1) : .windowBackgroundColor
-        window.contentView = host
-        host.frame = NSRect(origin: .zero, size: size)
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        defer { window.orderOut(nil); window.contentView = nil; window.close() }
-        try await Task.sleep(for: .milliseconds(450))
-        host.layoutSubtreeIfNeeded(); host.displayIfNeeded(); CATransaction.flush()
-        XCTAssertEqual(host.bounds.width, size.width, accuracy: 1, "Horizontal overflow: \(name)")
-        XCTAssertEqual(host.bounds.height, size.height, accuracy: 1, "Vertical overflow: \(name)")
-        let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds), "No bitmap: \(name)")
-        host.cacheDisplay(in: host.bounds, to: bitmap)
-        let data = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
-        try data.write(to: output.appendingPathComponent(name + ".png"), options: .atomic)
-        var shades = Set<Int>(), low = 1.0, high = 0.0, minimumAlpha = 1.0
-        for y in stride(from: 0, to: bitmap.pixelsHigh, by: 7) {
-            for x in stride(from: 0, to: bitmap.pixelsWide, by: 7) {
-                guard let c = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
-                minimumAlpha = min(minimumAlpha, c.alphaComponent)
-                let luminance = 0.2126 * c.redComponent + 0.7152 * c.greenComponent + 0.0722 * c.blueComponent
-                low = min(low, luminance); high = max(high, luminance)
-                shades.insert(Int((luminance * 255).rounded()))
-            }
-        }
-        XCTAssertGreaterThanOrEqual(minimumAlpha, 0.99, "Uncomposited render: \(name)")
-        XCTAssertGreaterThan(high - low, 0.15, "Blank/low-contrast render: \(name)")
-        XCTAssertGreaterThan(shades.count, 12, "Missing native content: \(name)")
-        let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.png")
-        attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
-        return Capture(name: name, width: Int(size.width), height: Int(size.height), pixelsWide: bitmap.pixelsWide, pixelsHigh: bitmap.pixelsHigh, luminanceRange: high - low, distinctSamples: shades.count, minimumAlpha: minimumAlpha)
+        try await NativeSnapshotCapture.render(content, named: name, size: size, dark: dark, output: output)
     }
-}
-
-@MainActor private final class SnapshotWindow: NSWindow {
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { true }
 }
