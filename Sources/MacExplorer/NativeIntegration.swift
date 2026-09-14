@@ -32,9 +32,8 @@ import ExplorerCore
     }
     static func privacySettings() { if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") { NSWorkspace.shared.open(url) } }
     static func eject(_ url: URL, owner: ExplorerWorkspace) {
-        NSWorkspace.shared.unmountAndEjectDevice(at: url) { error in
-            if let error { Task { @MainActor in owner.fail("Could not eject", error.localizedDescription) } }
-        }
+        do { try NSWorkspace.shared.unmountAndEjectDevice(at: url) }
+        catch { owner.fail("Could not eject", error.localizedDescription) }
     }
     static func volumes() -> [URL] { FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: [.volumeNameKey, .volumeTotalCapacityKey, .volumeAvailableCapacityKey, .volumeIsInternalKey, .volumeIsLocalKey], options: [.skipHiddenVolumes]) ?? [] }
     static func cloudFolders() -> [URL] {
