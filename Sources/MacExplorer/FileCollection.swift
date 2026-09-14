@@ -42,11 +42,11 @@ struct FileDetailsTable: View {
             TableColumn("Date modified", value: \.modified) { entry in Text(entry.modified.formatted(date: .abbreviated, time: .shortened)).foregroundStyle(.secondary) }.width(min: 130, ideal: 150).customizationID("modified")
             TableColumn("Kind", value: \.kind) { entry in Text(entry.kind).foregroundStyle(.secondary) }.width(min: 100, ideal: 140).customizationID("kind")
             TableColumn("Size", value: \.size) { entry in Text(entry.sizeText).monospacedDigit().foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .trailing) }.width(min: 65, ideal: 80).customizationID("size")
-            TableColumn("Tags") { entry in Text(entry.tags.joined(separator: ", ")).foregroundStyle(.secondary) }.width(min: 90, ideal: 130).customizationID("tags")
+            TableColumn("Tags") { entry in Text(entry.tags.joined(separator: ", ")).foregroundStyle(.secondary) }.width(min: 90, ideal: 130).customizationID("tags").defaultVisibility(.hidden)
             TableColumn("Availability") { entry in
                 if entry.isCloud { Label(entry.isDownloaded ? "Downloaded" : "Online only", systemImage: entry.isDownloaded ? "checkmark.icloud" : "icloud.and.arrow.down").foregroundStyle(.secondary) }
                 else { Text("Local").foregroundStyle(.tertiary) }
-            }.width(min: 90, ideal: 125).customizationID("availability")
+            }.width(min: 90, ideal: 125).customizationID("availability").defaultVisibility(.hidden)
         }
         .font(.system(size: 12))
         .contextMenu(forSelectionType: URL.self) { urls in FileContextMenu(workspace: workspace, urls: Array(urls)) } primaryAction: { urls in tab.selection = urls; workspace.openSelection() }

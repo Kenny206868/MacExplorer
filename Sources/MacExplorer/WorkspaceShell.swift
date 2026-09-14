@@ -22,6 +22,7 @@ struct WorkspaceShell: View {
                 HSplitView {
                     ExplorerSidebar(workspace: workspace, tab: tab)
                         .frame(minWidth: plan.sidebarMinimum, idealWidth: plan.sidebarIdeal, maxWidth: 264)
+                        .background(InitialPaneSizing(plan: plan, preview: preferences.value.previewPane, inspector: preferences.value.inspector))
                         .explorerRegion("sidebar")
                     FilePromiseDropHost(workspace: workspace) { fileContent }
                         .frame(minWidth: plan.contentMinimum, maxWidth: .infinity, maxHeight: .infinity)
@@ -30,7 +31,7 @@ struct WorkspaceShell: View {
                         VStack(spacing: 0) {
                             Picker("Auxiliary pane", selection: $compactPane) {
                                 Text("Details").tag("Details"); Text("Preview").tag("Preview")
-                            }.pickerStyle(.segmented).padding(12)
+                            }.pickerStyle(.segmented).labelsHidden().padding(12)
                             Divider()
                             if compactPane == "Preview" { preview }
                             else { ExplorerInspector(workspace: workspace, tab: tab) }

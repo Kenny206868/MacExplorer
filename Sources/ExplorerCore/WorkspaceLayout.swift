@@ -25,3 +25,21 @@ public struct WorkspaceLayout: Sendable, Equatable {
         auxiliaryCount = combinesAuxiliaryPanes ? 1 : (preview ? 1 : 0) + (inspector ? 1 : 0)
     }
 }
+
+extension WorkspaceLayout {
+    /// Native split-view initialization only; resizing remains under user control.
+    public func initialPaneWidths(totalWidth: Double, dividerThickness: Double) -> [Double] {
+        let totalWidth = totalWidth.isFinite ? max(requiredMinimum, totalWidth) : width
+        let divider = dividerThickness.isFinite ? max(0, dividerThickness) : 1
+        let usable = max(0, totalWidth - Double(auxiliaryCount + 1) * divider)
+        let sidebar = min(sidebarIdeal, max(sidebarMinimum, usable - contentMinimum - Double(auxiliaryCount) * auxiliaryMinimum))
+        var auxiliary = auxiliaryCount == 2 ? [310.0, 270.0] : auxiliaryCount == 1 ? [270.0] : []
+        let deficit = max(0, sidebar + contentMinimum + auxiliary.reduce(0, +) - usable)
+        let reducible = auxiliary.reduce(0) { $0 + max(0, $1 - auxiliaryMinimum) }
+        if deficit > 0, reducible > 0 {
+            auxiliary = auxiliary.map { max(auxiliaryMinimum, $0 - deficit * ($0 - auxiliaryMinimum) / reducible) }
+        }
+        let content = max(contentMinimum, usable - sidebar - auxiliary.reduce(0, +))
+        return [sidebar, content] + auxiliary
+    }
+}
