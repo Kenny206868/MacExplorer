@@ -32,11 +32,12 @@ struct FileDragAnchor: NSViewRepresentable {
         let urls = tab.displayEntries.lazy.filter { tab.selection.contains($0.url) }.map(\.url)
         guard !urls.isEmpty else { return false }
         let point = convert(event.locationInWindow, from: nil)
+        let fallbackIcon = NSWorkspace.shared.icon(forFile: url.path)
         let items = urls.enumerated().map { index, url -> NSDraggingItem in
             let item = NSDraggingItem(pasteboardWriter: url as NSURL)
             let offset = CGFloat(min(index, 5)) * 3
             item.setDraggingFrame(CGRect(x: point.x + offset, y: point.y + offset, width: 36, height: 36),
-                                  contents: NSWorkspace.shared.icon(forFile: url.path))
+                                  contents: index < 8 ? NSWorkspace.shared.icon(forFile: url.path) : fallbackIcon)
             return item
         }
         let session = beginDraggingSession(with: Array(items), event: event, source: self)
@@ -140,8 +141,10 @@ struct FileInteractionModifier: ViewModifier {
     let workspace: ExplorerWorkspace
     let tab: BrowserTab
     @StateObject private var target = SpringFolderTarget()
+    @ObservedObject private var clipboard = FileClipboard.shared
     func body(content: Content) -> some View {
-        content.background(FileDragAnchor(url: entry.url, workspace: workspace, tab: tab))
+        content.opacity(clipboard.isCut(entry.url) ? 0.5 : 1)
+            .background(FileDragAnchor(url: entry.url, workspace: workspace, tab: tab))
             .overlay(RoundedRectangle(cornerRadius: 6).stroke(target.highlighted ? Color.accentColor : .clear, lineWidth: 2).allowsHitTesting(false))
             .onDrop(of: ["public.file-url"], delegate: SpringFolderDrop(folder: entry.canBrowse ? entry.url : nil, workspace: workspace, target: target))
             .onDisappear { target.cancel() }

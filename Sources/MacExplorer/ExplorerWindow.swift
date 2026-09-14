@@ -4,7 +4,10 @@ import QuickLook
 import ExplorerCore
 
 struct ExplorerWindow: View {
-    @StateObject private var workspace = ExplorerWorkspace()
+    @StateObject private var workspace: ExplorerWorkspace
+    init(session: BrowserSession? = nil) {
+        _workspace = StateObject(wrappedValue: ExplorerWorkspace(session: session))
+    }
     @EnvironmentObject private var preferences: PreferenceStore
     @ObservedObject private var operations = OperationCenter.shared
     var body: some View {
@@ -16,7 +19,7 @@ struct ExplorerWindow: View {
             .onAppear { AppRouter.shared.active = workspace; workspace.current.refresh() }
             .onDisappear { workspace.answerCollision(.cancel); workspace.saveSession() }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { notification in
-                if let window = notification.object as? NSWindow, window == workspace.window { AppRouter.shared.active = workspace }
+                if let window = notification.object as? NSWindow, window == workspace.window { AppRouter.shared.active = workspace; FileClipboard.shared.refresh() }
             }
             .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didMountNotification)) { _ in workspace.current.refresh(); workspace.objectWillChange.send() }
             .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didUnmountNotification)) { _ in workspace.current.refresh(); workspace.objectWillChange.send() }
@@ -97,39 +100,6 @@ struct WorkspaceShell: View {
         }
         .background(Color(nsColor: .textBackgroundColor))
         .quickLookPreview($tab.previewURL)
-    }
-}
-
-struct ExplorerTabStrip: View {
-    @ObservedObject var workspace: ExplorerWorkspace
-    var body: some View {
-        HStack(spacing: 4) {
-            Color.clear.frame(width: 76, height: 1)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 4) {
-                    ForEach(workspace.tabs) { tab in TabLabel(tab: tab, workspace: workspace) }
-                    Button { workspace.newTab() } label: { Image(systemName: "plus").frame(width: 30, height: 30) }.buttonStyle(.plain).help("New tab (⌘T)")
-                }.padding(.top, 9)
-            }
-            Spacer(minLength: 8)
-            Image(systemName: "folder.badge.gearshape").foregroundStyle(.secondary).padding(.trailing, 16)
-        }.frame(height: 45).background(.bar)
-    }
-}
-private struct TabLabel: View {
-    @ObservedObject var tab: BrowserTab
-    @ObservedObject var workspace: ExplorerWorkspace
-    var body: some View {
-        HStack(spacing: 8) {
-            Button { workspace.activeID = tab.id } label: { Label(tab.location.title, systemImage: tab.location.symbol).font(.system(size: 12)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading) }.buttonStyle(.plain)
-            Button { workspace.closeTab(tab.id) } label: { Image(systemName: "xmark").font(.system(size: 9, weight: .medium)).frame(width: 18, height: 22) }.buttonStyle(.plain).help("Close tab")
-        }.padding(.horizontal, 10).frame(width: 180, height: 35)
-            .background(workspace.activeID == tab.id ? Color(nsColor: .textBackgroundColor) : .clear, in: UnevenRoundedRectangle(topLeadingRadius: 8, topTrailingRadius: 8))
-            .contextMenu {
-                Button("Duplicate Tab") { workspace.newTab(tab.location) }
-                Button("Close Tab") { workspace.closeTab(tab.id) }
-                Button("Close Other Tabs") { for other in workspace.tabs where other.id != tab.id { workspace.closeTab(other.id) } }
-            }
     }
 }
 

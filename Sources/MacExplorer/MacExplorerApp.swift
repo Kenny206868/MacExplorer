@@ -15,6 +15,13 @@ import ExplorerCore
         .defaultSize(width: 1260, height: 800)
         .windowStyle(.hiddenTitleBar)
         .commands { ExplorerCommands(updater: updater) }
+        WindowGroup("MacExplorer", id: "detached", for: BrowserSession.self) { session in
+            ExplorerWindow(session: session.wrappedValue)
+                .environmentObject(preferences).environmentObject(updater)
+                .preferredColorScheme(preferences.colorScheme)
+        }
+        .defaultSize(width: 1260, height: 800)
+        .windowStyle(.hiddenTitleBar)
         Settings { PreferencesView().environmentObject(preferences).environmentObject(updater).preferredColorScheme(preferences.colorScheme) }
     }
 }
@@ -46,7 +53,7 @@ extension FocusedValues {
 }
 
 struct ExplorerCommands: Commands {
-    @FocusedValue(\.explorerWorkspace) private var workspace
+    @FocusedObject(\.explorerWorkspace) private var workspace
     @ObservedObject var updater: AppUpdater
     @ObservedObject private var operations = OperationCenter.shared
     @ObservedObject private var preferences = PreferenceStore.shared
@@ -56,6 +63,7 @@ struct ExplorerCommands: Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Window") { openWindow(id: "explorer") }.keyboardShortcut("n")
             Button("New Tab") { workspace?.newTab() }.keyboardShortcut("t").disabled(workspace == nil)
+            Button("Reopen Closed Tab") { workspace?.reopenClosedTab() }.keyboardShortcut("t", modifiers: [.command, .shift]).disabled(workspace?.closedTabs.isEmpty != false)
             Button("New Folder") { workspace?.sheet = .newFolder }.keyboardShortcut("n", modifiers: [.command, .shift]).disabled(workspace?.destination == nil)
             Divider()
             Button("Open") { workspace?.openSelection() }.keyboardShortcut("o").disabled(workspace?.selected.isEmpty != false)
@@ -110,6 +118,9 @@ struct ExplorerCommands: Commands {
             Button("Refresh") { workspace?.current.refresh() }.keyboardShortcut("r")
         }
         CommandGroup(after: .windowArrangement) {
+            Button("Next Tab") { workspace?.cycleTab(1) }.keyboardShortcut("]", modifiers: [.command, .shift])
+            Button("Previous Tab") { workspace?.cycleTab(-1) }.keyboardShortcut("[", modifiers: [.command, .shift])
+            Divider()
             Button("File Operations…") { workspace?.sheet = .operations }.keyboardShortcut("j")
             Button("Recovery History…") { workspace?.sheet = .recovery }
         }

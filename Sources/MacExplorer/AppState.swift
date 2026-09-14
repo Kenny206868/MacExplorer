@@ -68,28 +68,33 @@ struct ConflictPrompt: Identifiable {
     @Published var revision = 0
     @Published var historyBusy = false
     var runningCount: Int { jobs.filter { !$0.finished }.count }
-    func submit(_ job: FileJob, owner: ExplorerWorkspace, completion: ((FileJobResult) -> Void)? = nil) {
-        let origin = owner.current, originLocation = owner.current.location
+    func submit(_ job: FileJob, owner: ExplorerWorkspace, cutTicket: FileClipboard.CutTicket? = nil, completion: ((FileJobResult) -> Void)? = nil) {
+        let origin = owner.current, location = owner.current.location
         let row = OperationRow(id: job.id, title: job.title)
         jobs.insert(row, at: 0)
         Task {
             let result = await FileOperationEngine.shared.run(job, control: row.control, progress: { [weak row] progress in
-                Task { @MainActor in row?.progress = progress; if row?.paused != true { row?.status = "Running" } }
+                Task { @MainActor in
+                    guard let row, !row.finished else { return }
+                    row.progress = progress; if !row.paused { row.status = "Running" }
+                }
             }, resolve: { [weak owner] collision in
                 guard let owner else { return CollisionAnswer(.cancel) }
                 return await owner.resolve(collision)
             })
             complete(row, result: result)
-            if origin.location == originLocation { origin.revealAfterRefresh(result.outputs) }
+            if let cutTicket { FileClipboard.shared.finish(cutTicket, moved: result.completedSources) }
             completion?(result)
+            if origin.location == location { if result.outputs.isEmpty { origin.refresh() } else { origin.refresh(selecting: result.outputs) } }
         }
     }
     func rename(_ mapping: [(URL, String)], owner: ExplorerWorkspace) {
-        let origin = owner.current, originLocation = owner.current.location
+        let origin = owner.current, location = owner.current.location
         let row = OperationRow(title: "Rename \(mapping.count) item(s)"); jobs.insert(row, at: 0)
         Task {
             let result = await FileOperationEngine.shared.rename(mapping, control: row.control)
-            complete(row, result: result); if origin.location == originLocation { origin.revealAfterRefresh(result.outputs) }
+            complete(row, result: result)
+            if origin.location == location { if result.outputs.isEmpty { origin.refresh() } else { origin.refresh(selecting: result.outputs) } }
         }
     }
     private func complete(_ row: OperationRow, result: FileJobResult) {
@@ -97,6 +102,7 @@ struct ConflictPrompt: Identifiable {
         row.status = result.cancelled ? "Cancelled — completed items were retained" : result.errors.isEmpty ? "Completed" : "Completed with errors"
         if !result.receipt.steps.isEmpty { undoStack.append(result.receipt); redoStack.removeAll() }
         revision += 1
+        // Never discard active jobs or recovery receipts while trimming presentation history.
         if jobs.count > 100 { jobs = Array(jobs.filter { !$0.finished } + jobs.filter(\.finished).prefix(100)) }
     }
     func undo(redo: Bool = false) {
@@ -108,34 +114,12 @@ struct ConflictPrompt: Identifiable {
             row.finished = true; row.errors = result.errors; row.status = result.errors.isEmpty ? "Completed" : "Stopped to protect changes"
             if !result.receipt.steps.isEmpty { if redo { undoStack.append(result.receipt) } else { redoStack.append(result.receipt) } }
             if !result.remaining.isEmpty {
-                let remaining = OperationReceipt(title: receipt.title, steps: result.remaining)
+                var remaining = OperationReceipt(title: receipt.title, steps: result.remaining)
+                remaining.renameBatch = receipt.renameBatch
                 if redo { redoStack.append(remaining) } else { undoStack.append(remaining) }
             }
             historyBusy = false; revision += 1
         }
-    }
-}
-
-@MainActor final class FileClipboard {
-    static let shared = FileClipboard()
-    private var cutURLs: [URL] = []
-    private var cutChangeCount = -1
-    func write(_ urls: [URL], cut: Bool) {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents(); pasteboard.writeObjects(urls as [NSURL])
-        cutURLs = cut ? urls : []; cutChangeCount = cut ? pasteboard.changeCount : -1
-    }
-    var contents: (urls: [URL], isCut: Bool) {
-        let p = NSPasteboard.general
-        let objects = p.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [NSURL] ?? []
-        let urls = objects.map { $0 as URL }
-        return (urls, p.changeCount == cutChangeCount && !cutURLs.isEmpty && Set(urls) == Set(cutURLs))
-    }
-    func consumeCut() { cutURLs = []; cutChangeCount = -1 }
-    func consumeCompletedMoves(_ urls: [URL], generation: Int) {
-        guard NSPasteboard.general.changeCount == generation, generation == cutChangeCount else { return }
-        let remaining = urls.filter { FileNames.exists($0) }
-        if remaining.isEmpty { consumeCut() } else { write(remaining, cut: true) }
     }
 }
 
@@ -145,8 +129,9 @@ enum ExplorerSheet: String, Identifiable { case newFolder, newFile, rename, prop
 @MainActor final class ExplorerWorkspace: ObservableObject, Identifiable {
     let id = UUID()
     @Published var tabs: [BrowserTab]
-    @Published var activeID: UUID
-    var closedTabs: [BrowserTab] = []
+    @Published var activeID: UUID { didSet { observeCurrentTab() } }
+    private var tabObservation: AnyCancellable?
+    @Published var closedTabs: [BrowserSession] = []
     @Published var sheet: ExplorerSheet?
     @Published var message: MessageBox?
     @Published var conflict: ConflictPrompt?
@@ -159,21 +144,34 @@ enum ExplorerSheet: String, Identifiable { case newFolder, newFile, rename, prop
     let preferences = PreferenceStore.shared
     let operations = OperationCenter.shared
     var current: BrowserTab { tabs.first(where: { $0.id == activeID }) ?? tabs[0] }
-    var selected: [FileEntry] { current.entries.filter { current.selection.contains($0.url) } }
+    var selected: [FileEntry] { current.displayEntries.filter { current.selection.contains($0.url) } }
     var selectedURLs: [URL] { selected.map(\.url) }
     var destination: URL? { current.location.directory }
-    init() {
+    init(session: BrowserSession? = nil) {
+        if let session {
+            let tab = BrowserTab(session.history.current)
+            tabs = [tab]; activeID = tab.id
+            tab.restore(session)
+            observeCurrentTab()
+            return
+        }
         let p = PreferenceStore.shared
-        let locations: [Location] = p.value.restoreTabs && !p.value.tabs.isEmpty ? p.value.tabs : [p.value.startLocation == "This Mac" ? .computer : .home]
+        let locations = p.value.restoreTabs && !p.value.tabs.isEmpty ? p.value.tabs : [.home]
         let initial = locations.prefix(20).map { BrowserTab($0) }
         tabs = initial; activeID = initial[0].id
+        observeCurrentTab()
+    }
+    private func observeCurrentTab() {
+        tabObservation = current.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
     }
     func saveSession() { preferences.value.tabs = tabs.map(\.location) }
     func newTab(_ location: Location? = nil) { let tab = BrowserTab(location ?? .home); tabs.append(tab); activeID = tab.id; saveSession() }
     func closeTab(_ id: UUID) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         if tabs.count == 1 { window?.performClose(nil); return }
-        tabs[index].stop(); closedTabs.append(tabs[index]); closedTabs = Array(closedTabs.suffix(20)); tabs.remove(at: index)
+        closedTabs.append(tabs[index].session())
+        if closedTabs.count > 30 { closedTabs.removeFirst() }
+        tabs[index].stop(); tabs.remove(at: index)
         if activeID == id { activeID = tabs[min(index, tabs.count - 1)].id }
         saveSession()
     }
@@ -186,7 +184,7 @@ enum ExplorerSheet: String, Identifiable { case newFolder, newFile, rename, prop
     func openURLs(_ urls: [URL]) {
         for url in urls {
             if let entry = try? FileEntry(url: url), entry.canBrowse { navigate(.folder(url), newTab: !current.entries.isEmpty) }
-            else { navigate(.folder(url.deletingLastPathComponent())); current.revealAfterRefresh([url]) }
+            else { navigate(.folder(url.deletingLastPathComponent())); current.selection = [url] }
         }
     }
     func goToAddress(_ text: String) {
@@ -197,14 +195,13 @@ enum ExplorerSheet: String, Identifiable { case newFolder, newFile, rename, prop
         catch { fail("Location unavailable", error.localizedDescription) }
     }
     func copy(cut: Bool = false) { guard !selectedURLs.isEmpty else { return }; FileClipboard.shared.write(selectedURLs, cut: cut) }
-    func paste(to folder: URL? = nil, forceMove: Bool = false) {
+    func paste(to folder: URL? = nil) {
         guard let destination = folder ?? destination else { fail("Choose a folder", "Navigate to a writable folder before pasting."); return }
         let clipboard = FileClipboard.shared.contents
         guard !clipboard.urls.isEmpty else { return }
-        let generation = NSPasteboard.general.changeCount
-        operations.submit(FileJob(clipboard.isCut || forceMove ? .move : .copy, sources: clipboard.urls, destination: destination), owner: self) { _ in
-            if clipboard.isCut { FileClipboard.shared.consumeCompletedMoves(clipboard.urls, generation: generation) }
-        }
+        let ticket = clipboard.isCut ? FileClipboard.shared.reserveCut() : nil
+        guard !clipboard.isCut || ticket != nil else { return }
+        operations.submit(FileJob(clipboard.isCut ? .move : .copy, sources: clipboard.urls, destination: destination), owner: self, cutTicket: ticket)
     }
     func transfer(to folder: URL, move: Bool, urls: [URL]? = nil) { operations.submit(FileJob(move ? .move : .copy, sources: urls ?? selectedURLs, destination: folder), owner: self) }
     func duplicate() { guard let destination else { return }; operations.submit(FileJob(.copy, sources: selectedURLs, destination: destination), owner: self) }
@@ -223,6 +220,7 @@ enum ExplorerSheet: String, Identifiable { case newFolder, newFile, rename, prop
     func quickLook() { current.previewURL = selectedURLs.first }
     func fail(_ title: String, _ text: String) { message = MessageBox(title: title, message: text) }
     func resolve(_ collision: FileCollision) async -> CollisionAnswer {
+        // Never suspend the global operation queue behind a prompt in a closed window.
         guard window?.isVisible == true else { return CollisionAnswer(.cancel) }
         sheet = nil
         return await withCheckedContinuation { continuation in conflict = ConflictPrompt(collision: collision, continuation: continuation) }
@@ -230,18 +228,6 @@ enum ExplorerSheet: String, Identifiable { case newFolder, newFile, rename, prop
     func answerCollision(_ choice: CollisionChoice, all: Bool = false) {
         guard let prompt = conflict else { return }; conflict = nil
         prompt.continuation.resume(returning: CollisionAnswer(choice, applyToAll: all))
-    }
-    func select(_ url: URL, extend: Bool, range: Bool) {
-        var state = current.selectionState
-        state.click(url, in: current.displayEntries.map(\.url), toggle: extend, range: range)
-        current.selectionState = state
-    }
-    func selectAll() { current.selection = Set(current.visibleEntries.map(\.url)) }
-    func invertSelection() { current.selection = Set(current.visibleEntries.map(\.url)).subtracting(current.selection) }
-    func moveSelection(_ offset: Int, extend: Bool = false) {
-        var state = current.selectionState
-        state.move(by: offset, in: current.displayEntries.map(\.url), extend: extend)
-        current.selectionState = state
     }
     func drop(_ providers: [NSItemProvider], to folder: URL, move: Bool) -> Bool {
         let accepted = providers.filter { $0.hasItemConformingToTypeIdentifier("public.file-url") }

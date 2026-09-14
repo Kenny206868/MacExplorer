@@ -17,15 +17,16 @@ import ExplorerCore
     @Published var options: FolderOptions { didSet { PreferenceStore.shared.remember(location, options) } }
     var selectionAnchor: URL?
     @Published var focusedURL: URL?
+    var rangeBaseline: Set<URL>?
     var typeAhead = TypeAheadSearch()
     var gridColumns = 1
-    var pendingSelection: Set<URL>?
+    private var pendingSelection: Set<URL>?
     var selectionState: ExplorerSelection<URL> {
         get { ExplorerSelection(selected: selection, anchor: selectionAnchor, focus: focusedURL) }
         set { selection = newValue.selected; selectionAnchor = newValue.anchor; focusedURL = newValue.focus }
     }
     var displayEntries: [FileEntry] { options.group == .none ? visibleEntries : groups.flatMap { $0.1 } }
-    func revealAfterRefresh(_ urls: [URL]) { pendingSelection = Set(urls); refresh() }
+    func revealAfterRefresh(_ urls: [URL]) { refresh(selecting: urls) }
     let service = FileService()
     private var work: Task<Void, Never>?
     private let watcher = DirectoryWatcher()
@@ -51,12 +52,20 @@ import ExplorerCore
     }
     init(_ location: Location) { history = NavigationHistory(location); options = PreferenceStore.shared.folderOptions(location) }
     func stop() { generation += 1; work?.cancel(); spotlight.stop(); watcher.stop() }
+    func refresh(selecting urls: [URL]) {
+        pendingSelection = Set(urls)
+        refresh()
+    }
+    private func resetSelection() {
+        selection = []; selectionAnchor = nil; focusedURL = nil
+        rangeBaseline = nil; pendingSelection = nil; typeAhead = TypeAheadSearch()
+    }
     func navigate(_ location: Location) {
-        stop(); history.navigate(location); query = ""; selection = []; selectionAnchor = nil; focusedURL = nil; typeAhead.reset(); pendingSelection = nil
+        stop(); history.navigate(location); query = ""; resetSelection()
         options = PreferenceStore.shared.folderOptions(location); refresh()
     }
-    func back() { if history.canGoBack { stop(); history.back(); query = ""; selection = []; selectionAnchor = nil; focusedURL = nil; typeAhead.reset(); pendingSelection = nil; options = PreferenceStore.shared.folderOptions(location); refresh() } }
-    func forward() { if history.canGoForward { stop(); history.forward(); query = ""; selection = []; selectionAnchor = nil; focusedURL = nil; typeAhead.reset(); pendingSelection = nil; options = PreferenceStore.shared.folderOptions(location); refresh() } }
+    func back() { if history.canGoBack { stop(); history.back(); query = ""; resetSelection(); options = PreferenceStore.shared.folderOptions(location); refresh() } }
+    func forward() { if history.canGoForward { stop(); history.forward(); query = ""; resetSelection(); options = PreferenceStore.shared.folderOptions(location); refresh() } }
     func up() { if let directory = location.directory, directory.path != "/" { navigate(.folder(directory.deletingLastPathComponent())) } else { navigate(.computer) } }
     func scheduleSearch() { work?.cancel(); work = Task { try? await Task.sleep(for: .milliseconds(260)); guard !Task.isCancelled else { return }; refresh() } }
     func refresh() {
@@ -119,8 +128,11 @@ import ExplorerCore
     }
     private func install(_ snapshot: DirectorySnapshot) {
         entries = snapshot.entries; warnings = snapshot.warnings; truncated = snapshot.truncated
-        if let pendingSelection { selection = pendingSelection; focusedURL = entries.first(where: { pendingSelection.contains($0.url) })?.url; selectionAnchor = focusedURL; self.pendingSelection = nil }
-        var state = selectionState; state.reconcile(with: displayEntries.map(\.url)); selectionState = state
+        let available = Set(entries.map(\.url))
+        if let pendingSelection { selection = pendingSelection.intersection(available); self.pendingSelection = nil }
+        else { selection.formIntersection(available) }
+        if let focus = focusedURL, !available.contains(focus) { focusedURL = nil }
+        if let anchor = selectionAnchor, !available.contains(anchor) { selectionAnchor = nil; rangeBaseline = nil }
     }
     private func scheduleRefresh() { work?.cancel(); work = Task { try? await Task.sleep(for: .milliseconds(180)); guard !Task.isCancelled else { return }; refresh() } }
 }
