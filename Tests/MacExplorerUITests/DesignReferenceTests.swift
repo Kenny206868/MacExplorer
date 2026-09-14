@@ -6,22 +6,20 @@ import ExplorerCore
 
 final class DesignReferenceTests: XCTestCase {
     @MainActor private final class GeometryProbe { var regions: [String: CGRect] = [:] }
-
     @MainActor func testPopulatedReferenceViewsMatchDesignGeometryAndPalette() async throws {
         guard let path = ProcessInfo.processInfo.environment["MACEXPLORER_SNAPSHOT_DIR"] else { throw XCTSkip("Native capture job only") }
         _ = NSApplication.shared
         let output = URL(fileURLWithPath: path), manager = FileManager.default
         try manager.createDirectory(at: output, withIntermediateDirectories: true)
-        let root = manager.temporaryDirectory.appendingPathComponent("MacExplorer-Reference-" + UUID().uuidString)
-        let documents = root.appendingPathComponent("Documents")
+        let fixtureRoot = manager.temporaryDirectory.appendingPathComponent("MacExplorer-Reference-" + UUID().uuidString)
+        let root = fixtureRoot.appendingPathComponent("This Mac"), documents = root.appendingPathComponent("Documents")
         let store = PreferenceStore.shared, previous = store.value
-        let previousColumns = DetailsColumnStore.shared.value
-        let previousJobs = OperationCenter.shared.jobs
+        let previousColumns = DetailsColumnStore.shared.value, previousJobs = OperationCenter.shared.jobs
         let preferencesKey = "MacExplorer.preferences.v1", saved = UserDefaults.standard.data(forKey: "MacExplorer.preferences.v1")
         defer {
             store.value = previous; DetailsColumnStore.shared.value = previousColumns; OperationCenter.shared.jobs = previousJobs
             if let saved { UserDefaults.standard.set(saved, forKey: preferencesKey) } else { UserDefaults.standard.removeObject(forKey: preferencesKey) }
-            try? manager.removeItem(at: root)
+            try? manager.removeItem(at: fixtureRoot)
         }
         try manager.createDirectory(at: documents, withIntermediateDirectories: true)
         let folders = ["Desktop", "Downloads", "Documents", "Pictures", "Projects", "Design assets"].map { root.appendingPathComponent($0) }
@@ -37,11 +35,9 @@ final class DesignReferenceTests: XCTestCase {
         var settings = Preferences(); settings.pins = folders.map(Bookmark.init); settings.restoreTabs = false; settings.inspector = true; settings.previewPane = false
         settings.recent = entries.map { Bookmark($0.url) }; settings.theme = "light"
         store.value = settings; DetailsColumnStore.shared.value = DetailsColumns(); OperationCenter.shared.jobs = []
-        var captures: [NativeViewSnapshotTests.Capture] = []
-        var evidence: [[String: String]] = []
+        var captures: [NativeViewSnapshotTests.Capture] = [], evidence: [[String: String]] = []
         for dark in [false, true] {
-            let theme = dark ? "dark" : "light"
-            store.value.theme = theme
+            let theme = dark ? "dark" : "light"; store.value.theme = theme
             for name in ["home", "details", "computer"] {
                 let location: Location = name == "home" ? .home : name == "computer" ? .computer : .folder(documents)
                 let workspace = ExplorerWorkspace(session: BrowserSession(id: UUID(), history: NavigationHistory(location), options: FolderOptions(), query: "", allLocations: false, selection: []))
@@ -57,20 +53,17 @@ final class DesignReferenceTests: XCTestCase {
                 XCTAssertEqual(try XCTUnwrap(geometry["sidebar"]).width, 211, accuracy: 0.5, captureName)
                 XCTAssertEqual(try XCTUnwrap(geometry["inspector"]).width, 254, accuracy: 0.5, captureName)
                 XCTAssertEqual(try XCTUnwrap(geometry["files"]).width, 793, accuracy: 0.5, captureName)
-                for (region, height) in [("tabs", 48.0), ("commands", 54), ("address", 54), ("status", 30)] {
-                    XCTAssertEqual(try XCTUnwrap(geometry[region]).height, height, accuracy: 0.5, captureName + " " + region)
-                }
+                for (region, height) in [("tabs", 48.0), ("commands", 54), ("address", 54), ("status", 30)] { XCTAssertEqual(try XCTUnwrap(geometry[region]).height, height, accuracy: 0.5, captureName + " " + region) }
                 let bitmap = try XCTUnwrap(NSBitmapImageRep(data: Data(contentsOf: output.appendingPathComponent(captureName + ".png"))))
                 try assertColor(bitmap, point: CGPoint(x: 880, y: 22), rgb: dark ? 0x292B33 : 0xF7F7F9, label: captureName + " title chrome")
                 try assertColor(bitmap, point: CGPoint(x: 6, y: 510), rgb: dark ? 0x25272F : 0xF3F4F7, label: captureName + " sidebar")
                 try assertColor(bitmap, point: CGPoint(x: 1249, y: 735), rgb: dark ? 0x202228 : 0xFFFFFF, label: captureName + " inspector canvas")
                 if name == "details" {
-                    let frame = try XCTUnwrap(geometry["files"])
-                    let index = try XCTUnwrap(tab.displayEntries.firstIndex { $0.url == entries[3].url })
+                    let frame = try XCTUnwrap(geometry["files"]), index = try XCTUnwrap(tab.displayEntries.firstIndex { $0.url == entries[3].url })
                     try assertColor(bitmap, point: CGPoint(x: frame.maxX - 5, y: frame.minY + 34 + CGFloat(index) * 36 + 18), rgb: dark ? 0x153E6D : 0xE4F0FF, label: captureName + " selected row")
                     try assertColor(bitmap, point: CGPoint(x: frame.minX + 35, y: 720), rgb: dark ? 0x202228 : 0xFFFFFF, label: captureName + " no empty zebra rows")
                 }
-                evidence.append(["capture": captureName, "geometry": "211 sidebar / 793 files / 254 inspector", "palette": "reference surfaces and selection checked"])
+                evidence.append(["capture": captureName, "geometry": "211 sidebar / 793 files / 254 inspector", "palette": "encoded sRGB surface and selection channels checked"])
                 workspace.tabs.forEach { $0.stop() }
             }
         }
@@ -80,21 +73,23 @@ final class DesignReferenceTests: XCTestCase {
         XCTAssertEqual(captures.count, 6)
     }
     @MainActor private func assertColor(_ bitmap: NSBitmapImageRep, point: CGPoint, rgb: Int, label: String) throws {
+        // Compare the encoded PNG's RGB channels, not an NSColor converted a
+        // second time through the legacy calibrated-RGB interpretation.
+        XCTAssertEqual(bitmap.bitsPerSample, 8, label); XCTAssertFalse(bitmap.isPlanar, label)
+        XCTAssertGreaterThanOrEqual(bitmap.samplesPerPixel, 3, label)
         let scale = CGFloat(bitmap.pixelsWide) / 1260
-        let expected = [Double((rgb >> 16) & 255), Double((rgb >> 8) & 255), Double(rgb & 255)]
+        let expected = [(rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255]
         for offset in [-1, 0, 1] {
-            let color = try XCTUnwrap(bitmap.colorAt(x: Int(point.x * scale) + offset, y: Int(point.y * scale))?.usingColorSpace(.sRGB), label)
-            for (actual, reference) in zip([color.redComponent, color.greenComponent, color.blueComponent], expected) {
-                XCTAssertEqual(Double(actual * 255), reference, accuracy: 6, label)
-            }
+            var pixel = [Int](repeating: 0, count: bitmap.samplesPerPixel)
+            bitmap.getPixel(&pixel, atX: Int(point.x * scale) + offset, y: Int(point.y * scale))
+            for (actual, reference) in zip(pixel.prefix(3), expected) { XCTAssertEqual(Double(actual), Double(reference), accuracy: 6, label) }
         }
     }
     @MainActor private func createPDF(at url: URL) throws {
         var box = CGRect(x: 0, y: 0, width: 420, height: 560)
         let consumer = try XCTUnwrap(CGDataConsumer(url: url as CFURL))
         let context = try XCTUnwrap(CGContext(consumer: consumer, mediaBox: &box, nil))
-        context.beginPDFPage(nil)
-        context.setFillColor(NSColor.white.cgColor); context.fill(box)
+        context.beginPDFPage(nil); context.setFillColor(NSColor.white.cgColor); context.fill(box)
         context.setFillColor(NSColor(srgbRed: 0.06, green: 0.38, blue: 0.75, alpha: 1).cgColor); context.fill(CGRect(x: 0, y: 440, width: 420, height: 120))
         NSGraphicsContext.saveGraphicsState(); NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
         ("PROJECT PROPOSAL" as NSString).draw(at: CGPoint(x: 32, y: 484), withAttributes: [.font: NSFont.systemFont(ofSize: 24, weight: .bold), .foregroundColor: NSColor.white])

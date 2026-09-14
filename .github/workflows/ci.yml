@@ -6,7 +6,9 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: ci-${{ github.ref }}
+  # Main commits finish their immutable alpha evidence even while development
+  # continues. New PR revisions still cancel their obsolete PR run.
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: true
 jobs:
   native:
