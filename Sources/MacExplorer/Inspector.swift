@@ -16,60 +16,61 @@ struct ExplorerInspector: View {
             HStack {
                 Text("Details").font(.system(size: 12, weight: .semibold)); Spacer()
                 CommandIcon("Close Details", "xmark") { preferences.value.inspector = false }
-            }.padding(.leading, 18).padding(.trailing, 8).frame(height: 46)
-            Divider()
+            }.padding(.leading, 20).padding(.trailing, 10).frame(height: 48)
+            ExplorerRule()
             ScrollView {
-                if let entry = selection.first {
-                    VStack(alignment: .leading, spacing: 18) {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 12).fill(ExplorerDesign.surface.opacity(0.5))
-                            FileThumbnail(entry: entry, size: 120).padding(22)
-                            if selection.count > 1 {
-                                Text("\(selection.count)").font(.system(size: 12, weight: .semibold)).monospacedDigit()
-                                    .padding(8).background(.regularMaterial, in: Capsule()).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing).padding(12)
-                            }
-                        }.frame(height: 166).overlay(RoundedRectangle(cornerRadius: 12).stroke(ExplorerDesign.separator, lineWidth: 0.5))
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(selection.count > 1 ? "\(selection.count) items selected" : entry.name)
-                                .font(.system(size: 16, weight: .semibold)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                            Text(summary(entry)).font(.caption).foregroundStyle(.secondary)
-                        }
-                        HStack(spacing: 8) {
-                            Button("Quick Look") { workspace.quickLook() }.buttonStyle(.borderedProminent)
-                            ShareLink(items: selection.map(\.url)) { Label("Share", systemImage: "square.and.arrow.up") }.buttonStyle(.bordered)
-                        }.controlSize(.small)
-                        Divider()
-                        Grid(alignment: .topLeading, horizontalSpacing: 10, verticalSpacing: 12) {
-                            ForEach(fields(entry), id: \.0) { key, value in
-                                GridRow {
-                                    Text(key).foregroundStyle(.secondary).frame(width: 62, alignment: .leading)
-                                    Text(value).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                            }
-                        }.font(.system(size: 11))
-                        if let error { Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.secondary) }
-                        Divider()
-                        HStack { Text("Tags").font(.system(size: 12, weight: .semibold)); Spacer(); Button("Edit…") { workspace.sheet = .tags }.font(.caption) }
-                        let tags = Array(Set(selection.flatMap(\.tags))).sorted()
-                        if tags.isEmpty { Text("No tags").font(.caption).foregroundStyle(.tertiary) }
-                        else { FlowTags(tags: tags) }
-                        Button("Show all properties…") { workspace.sheet = .properties }.font(.caption).buttonStyle(.link)
-                    }.padding(18)
-                } else {
-                    ContentUnavailableView("Select a file", systemImage: "info.circle", description: Text("File information and tags appear here.")).padding(.top, 30)
-                }
+                if let entry = selection.first { information(entry).padding(20) }
+                else { emptyState.padding(20) }
             }
-        }.background(ExplorerDesign.surface.opacity(0.16))
+        }.foregroundStyle(ExplorerDesign.text).background(ExplorerDesign.canvas)
             .task(id: selectionKey) {
                 metadata = [:]; metadataURL = nil; error = nil
                 guard selection.count == 1, let url = selection.first?.url else { return }
                 do {
                     let result = try await tab.service.inspect(url)
-                    guard !Task.isCancelled else { return }
-                    metadataURL = url; metadata = result
+                    guard !Task.isCancelled else { return }; metadataURL = url; metadata = result
                 } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
             }
+    }
+    private func information(_ entry: FileEntry) -> some View {
+        VStack(alignment: .leading, spacing: 17) {
+            ZStack(alignment: .bottomTrailing) {
+                RoundedRectangle(cornerRadius: 9).fill(ExplorerDesign.chrome)
+                FileArtwork(entry: entry, size: entry.isImage ? 168 : 104).frame(maxWidth: .infinity, maxHeight: .infinity)
+                if selection.count > 1 { Text("\(selection.count) items").font(.system(size: 10, weight: .medium)).padding(7).background(ExplorerDesign.canvas, in: Capsule()).padding(10) }
+            }.frame(height: 188).overlay(RoundedRectangle(cornerRadius: 9).stroke(ExplorerDesign.separator, lineWidth: 1))
+            VStack(alignment: .leading, spacing: 5) {
+                Text(selection.count > 1 ? "\(selection.count) items selected" : entry.name).font(.system(size: 15, weight: .semibold)).lineLimit(3).textSelection(.enabled)
+                Text(summary(entry)).font(.system(size: 11)).foregroundStyle(ExplorerDesign.muted)
+            }
+            HStack(spacing: 8) {
+                Button("Quick Look") { workspace.quickLook() }.buttonStyle(ExplorerButtonStyle(primary: true))
+                ShareLink(items: selection.map(\.url)) { Image(systemName: "square.and.arrow.up").frame(width: 13) }.buttonStyle(ExplorerButtonStyle()).help("Share selected items")
+            }
+            ExplorerRule()
+            VStack(alignment: .leading, spacing: 13) {
+                Text("INFORMATION").font(.system(size: 9, weight: .semibold)).tracking(0.8).foregroundStyle(ExplorerDesign.muted)
+                ForEach(fields(entry), id: \.0) { key, value in
+                    HStack(alignment: .top, spacing: 8) {
+                        Text(key).foregroundStyle(ExplorerDesign.muted).frame(width: 72, alignment: .leading)
+                        Text(value).lineLimit(key == "Where" ? 2 : 3).truncationMode(.middle).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                    }.font(.system(size: 11))
+                }
+            }.help(entry.url.deletingLastPathComponent().path)
+            if let error { Label(error, systemImage: "exclamationmark.triangle").font(.system(size: 10)).foregroundStyle(ExplorerDesign.muted) }
+            ExplorerRule()
+            HStack { Text("Tags").font(.system(size: 12, weight: .semibold)); Spacer(); Button("Edit…") { workspace.sheet = .tags }.font(.system(size: 11)).buttonStyle(.plain).foregroundStyle(Color.accentColor) }
+            let tags = Array(Set(selection.flatMap(\.tags))).sorted()
+            if tags.isEmpty { Text("No tags").font(.system(size: 11)).foregroundStyle(ExplorerDesign.muted) } else { FlowTags(tags: tags) }
+            Button("Show all properties…") { workspace.sheet = .properties }.font(.system(size: 11)).buttonStyle(.plain).foregroundStyle(Color.accentColor).padding(.top, 2)
+        }
+    }
+    private var emptyState: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "doc.text.magnifyingglass").font(.system(size: 36, weight: .light)).foregroundStyle(ExplorerDesign.muted.opacity(0.55))
+            Text("Select a file").font(.system(size: 14, weight: .semibold))
+            Text("See a preview, file information, and tags without leaving your workspace.").font(.system(size: 11)).foregroundStyle(ExplorerDesign.muted).multilineTextAlignment(.center)
+        }.frame(maxWidth: .infinity).padding(.top, 54)
     }
     private func summary(_ entry: FileEntry) -> String {
         if selection.count == 1 { return entry.kind + " · " + entry.sizeText }
@@ -78,37 +79,30 @@ struct ExplorerInspector: View {
     }
     private func fields(_ entry: FileEntry) -> [(String, String)] {
         let parents = Set(selection.map { $0.url.deletingLastPathComponent() })
-        let bytes = selection.reduce(Int64(0)) { total, entry in
+        let bytes = selection.filter { !$0.isDirectory }.reduce(Int64(0)) { total, entry in
             let (value, overflow) = total.addingReportingOverflow(max(0, entry.size)); return overflow ? .max : value
         }
-        var result: [(String, String)] = [
-            ("Location", parents.count == 1 ? entry.url.deletingLastPathComponent().path : "Multiple locations"),
-            ("Size", ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) + (selection.contains(where: \.isDirectory) ? " in selected files" : ""))
-        ]
+        var result: [(String, String)] = [("Where", parents.count == 1 ? entry.url.deletingLastPathComponent().lastPathComponent : "Multiple locations"),
+            ("Size", ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) + (selection.contains(where: \.isDirectory) ? " in selected files" : ""))]
         if selection.count == 1 {
-            result += [("Created", entry.created.formatted(date: .abbreviated, time: .shortened)),
-                       ("Modified", entry.modified.formatted(date: .abbreviated, time: .shortened)),
-                       ("Cloud", entry.isCloud ? (entry.isDownloaded ? "Downloaded" : "Online only") : "Local")]
+            result += [("Created", entry.created.formatted(date: .abbreviated, time: .omitted)), ("Modified", entry.modified.formatted(date: .abbreviated, time: .omitted)),
+                       ("Availability", entry.isCloud ? (entry.isDownloaded ? "Downloaded" : "Online only") : "On this Mac")]
             if metadataURL == entry.url, let permissions = metadata["Permissions"] { result.append(("Permissions", permissions)) }
             if entry.isLocked { result.append(("Locked", "Yes")) }
         }
         return result
     }
 }
-
 struct FlowTags: View {
     let tags: [String]
     var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 65), spacing: 5)], alignment: .leading, spacing: 5) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 64), spacing: 6)], alignment: .leading, spacing: 6) {
             ForEach(tags, id: \.self) { tag in
-                Label(tag, systemImage: "circle.fill").font(.system(size: 10)).labelStyle(TagLabelStyle())
-                    .padding(.horizontal, 7).padding(.vertical, 5).background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 5))
+                HStack(spacing: 5) { Circle().fill(ExplorerDesign.tagColor(tag)).frame(width: 5, height: 5); Text(tag).lineLimit(1) }
+                    .font(.system(size: 10)).padding(.horizontal, 8).padding(.vertical, 5)
+                    .background(ExplorerDesign.tagColor(tag).opacity(0.08), in: Capsule())
+                    .overlay(Capsule().stroke(ExplorerDesign.tagColor(tag).opacity(0.2), lineWidth: 0.5))
             }
         }
-    }
-}
-private struct TagLabelStyle: LabelStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 4) { configuration.icon.font(.system(size: 6)).foregroundStyle(.tint); configuration.title.lineLimit(1) }
     }
 }
