@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 /// Exact geometry shared by the SwiftUI grid and selection hit testing. Unmaterialized
 /// LazyVGrid cells remain selectable without retaining a view or rectangle per file.
