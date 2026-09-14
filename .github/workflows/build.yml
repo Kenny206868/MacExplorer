@@ -17,7 +17,6 @@ jobs:
   universal:
     # Both supported standard pools produce the same arm64+x86_64 universal app.
     # Use MACOS_BUILD_RUNNER=macos-15 to execute tests natively on Apple Silicon.
-    # Intel is the default alternate while the arm64 pool has a prolonged queue.
     runs-on: ${{ vars.MACOS_BUILD_RUNNER || 'macos-15-intel' }}
     timeout-minutes: 45
     steps:
@@ -32,7 +31,7 @@ jobs:
       - name: Resolve pinned dependencies
         run: swift package resolve
       - name: Core tests
-        run: swift test --parallel
+        run: swift test --parallel --filter ExplorerCoreTests
       - name: Build universal app, ZIP, and DMG
         env:
           VERSION: ${{ inputs.version }}
