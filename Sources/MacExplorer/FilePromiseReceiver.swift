@@ -181,7 +181,7 @@ struct FilePromiseDropHost<Content: View>: NSViewRepresentable {
 
 @MainActor final class PromiseDropHostingView: NSHostingView<AnyView> {
     weak var workspace: ExplorerWorkspace?
-    func registerPromises() { registerForDraggedTypes(NSFilePromiseReceiver.readableDraggedTypes.map(NSPasteboard.PasteboardType.init)) }
+    func registerPromises() { registerForDraggedTypes(NSFilePromiseReceiver.readableDraggedTypes.map { NSPasteboard.PasteboardType($0) }) }
     override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); registerPromises() }
     private func accepts(_ info: NSDraggingInfo) -> Bool {
         guard workspace?.destination != nil, !(info.draggingSource is FileDragAnchorView) else { return false }

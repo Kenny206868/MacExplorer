@@ -53,7 +53,15 @@ import ExplorerCore
             selectBoundary(last: key == 119, extend: shift, focusOnly: control && !shift)
         } else {
             let stride = [.details, .list, .content, .gallery].contains(current.options.view) ? 1 : max(1, current.gridColumns)
-            let delta = key == 123 ? -1 : key == 124 ? 1 : key == 126 ? -stride : stride
+            var delta = key == 123 ? -1 : key == 124 ? 1 : key == 126 ? -stride : stride
+            if stride > 1 && (key == 125 || key == 126) {
+                let files = current.displayEntries
+                let index = files.firstIndex { $0.url == current.focusedURL }
+                    ?? files.firstIndex { current.selection.contains($0.url) }
+                if let index, let neighbor = GridNavigation.verticalNeighbor(of: index, counts: current.groups.map { $0.1.count }, columns: stride, direction: key == 126 ? -1 : 1) {
+                    delta = neighbor - index
+                }
+            }
             moveSelection(delta, extend: shift, focusOnly: control && !shift)
         }
     }
