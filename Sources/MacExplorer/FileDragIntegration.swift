@@ -2,15 +2,12 @@ import SwiftUI
 import AppKit
 import ExplorerCore
 
-/// SwiftUI owns the visuals. This transparent adapter supplies AppKit's multi-item
-/// dragging session, which a single SwiftUI onDrag item provider cannot express.
 struct FileDragAnchor: NSViewRepresentable {
     let url: URL
     let workspace: ExplorerWorkspace
     let tab: BrowserTab
     func makeNSView(context: Context) -> FileDragAnchorView {
-        let view = FileDragAnchorView(); updateNSView(view, context: context)
-        FileDragRouter.shared.register(view); return view
+        let view = FileDragAnchorView(); updateNSView(view, context: context); FileDragRouter.shared.register(view); return view
     }
     func updateNSView(_ view: FileDragAnchorView, context: Context) { view.url = url; view.workspace = workspace; view.tab = tab }
     static func dismantleNSView(_ view: FileDragAnchorView, coordinator: ()) { FileDragRouter.shared.unregister(view) }
@@ -21,40 +18,36 @@ struct FileDragAnchor: NSViewRepresentable {
     weak var tab: BrowserTab?
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override var isFlipped: Bool { true }
-    /// Shared by the real drag session and headless native integration tests.
+    var isEditingFilename: Bool {
+        guard let tab, let url else { return false }
+        return FilenameEditorRegistry.shared.editor(for: tab).session?.source == url
+    }
     func prepareEntries() -> [FileEntry] {
-        guard let url, let tab, let workspace, workspace.current.id == tab.id,
-              tab.displayEntries.contains(where: { $0.url == url }) else { return [] }
+        guard let url, let tab, let workspace, workspace.current.id == tab.id, !isEditingFilename,
+              tab.navigableEntries.contains(where: { $0.url == url }) else { return [] }
         workspace.activatePane(files: true)
         if !tab.selection.contains(url) { workspace.select(url, extend: false, range: false) }
         return tab.selectedEntries
     }
     func begin(_ event: NSEvent) -> Bool {
         guard let url, let tab, let workspace, workspace.current.id == tab.id else { return false }
-        let entries = prepareEntries()
-        guard !entries.isEmpty else { return false }
-        let point = convert(event.locationInWindow, from: nil)
-        let fallbackIcon = NSWorkspace.shared.icon(forFile: url.path)
+        let entries = prepareEntries(); guard !entries.isEmpty else { return false }
+        let point = convert(event.locationInWindow, from: nil), fallbackIcon = NSWorkspace.shared.icon(forFile: url.path)
         let providers: [ExplorerFilePromiseProvider]
         do { providers = try entries.map { try ExplorerFilePromiseProvider.make(for: $0) } }
         catch { workspace.fail("Drag unavailable", error.localizedDescription); return false }
         let items = providers.enumerated().map { index, provider -> NSDraggingItem in
-            let url = entries[index].url, item = NSDraggingItem(pasteboardWriter: provider)
-            let offset = CGFloat(min(index, 5)) * 3
-            item.setDraggingFrame(CGRect(x: point.x + offset, y: point.y + offset, width: 36, height: 36),
-                                  contents: index < 8 ? NSWorkspace.shared.icon(forFile: url.path) : fallbackIcon)
+            let url = entries[index].url, item = NSDraggingItem(pasteboardWriter: provider), offset = CGFloat(min(index, 5)) * 3
+            item.setDraggingFrame(CGRect(x: point.x + offset, y: point.y + offset, width: 36, height: 36), contents: index < 8 ? NSWorkspace.shared.icon(forFile: url.path) : fallbackIcon)
             return item
         }
-        let session = beginDraggingSession(with: Array(items), event: event, source: self)
-        session.draggingFormation = .pile; session.animatesToStartingPositionsOnCancelOrFail = true
-        return true
+        let session = beginDraggingSession(with: items, event: event, source: self)
+        session.draggingFormation = .pile; session.animatesToStartingPositionsOnCancelOrFail = true; return true
     }
-    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
-        context == .withinApplication ? [.copy, .move, .link] : .copy
-    }
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation { context == .withinApplication ? [.copy, .move, .link] : .copy }
     func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
-        // A URL drop destination performs the transaction. Never remove a source
-        // based only on a reported drag operation: that risks a double deletion.
+        // The receiver commits the operation. A reported Move is never authority
+        // for this source to delete its files a second time.
         FileDragRouter.shared.endSession(); tab?.refresh()
     }
 }
@@ -64,7 +57,7 @@ struct FileDragAnchor: NSViewRepresentable {
     private var monitor: Any?
     private weak var candidate: FileDragAnchorView?
     private var candidateURL: URL?
-    private var origin = NSPoint.zero
+    private var downEvent: NSEvent?
     private var activeSource: FileDragAnchorView?
     func register(_ view: FileDragAnchorView) {
         anchors.add(view); guard monitor == nil else { return }
@@ -73,7 +66,7 @@ struct FileDragAnchor: NSViewRepresentable {
         }
     }
     func unregister(_ view: FileDragAnchorView) {
-        anchors.remove(view); if candidate === view { candidate = nil }
+        anchors.remove(view); if candidate === view { candidate = nil; downEvent = nil }
         if anchors.allObjects.isEmpty, activeSource == nil { removeMonitor() }
     }
     func folder(at point: NSPoint, in window: NSWindow?, workspace: ExplorerWorkspace) -> URL? {
@@ -84,27 +77,24 @@ struct FileDragAnchor: NSViewRepresentable {
                 && workspace.current.entries.contains { $0.url == view.url && $0.canBrowse }
         }?.url
     }
-    func endSession() {
-        activeSource = nil; candidate = nil
-        if anchors.allObjects.isEmpty { removeMonitor() }
-    }
+    func endSession() { activeSource = nil; candidate = nil; downEvent = nil; if anchors.allObjects.isEmpty { removeMonitor() } }
     private func removeMonitor() { if let monitor { NSEvent.removeMonitor(monitor) }; monitor = nil }
     private func handle(_ event: NSEvent) -> NSEvent? {
         switch event.type {
         case .leftMouseDown:
-            candidate = nil; guard event.window?.attachedSheet == nil else { return event }
-            origin = event.locationInWindow
+            candidate = nil; downEvent = nil; guard event.window?.attachedSheet == nil else { return event }
             candidate = anchors.allObjects.first { view in
-                guard view.window === event.window, !view.isHiddenOrHasHiddenAncestor else { return false }
-                return view.visibleRect.contains(view.convert(origin, from: nil))
+                view.window === event.window && !view.isHiddenOrHasHiddenAncestor && !view.isEditingFilename
+                    && view.visibleRect.contains(view.convert(event.locationInWindow, from: nil))
             }
-            candidateURL = candidate?.url
+            candidateURL = candidate?.url; if candidate != nil { downEvent = event }
         case .leftMouseDragged:
-            guard activeSource == nil, let candidate, candidate.window === event.window,
-                  candidate.url == candidateURL, hypot(event.locationInWindow.x - origin.x, event.locationInWindow.y - origin.y) >= 5 else { return event }
+            guard activeSource == nil, let candidate, let downEvent, candidate.window === event.window,
+                  !candidate.isEditingFilename, candidate.url == candidateURL,
+                  hypot(event.locationInWindow.x - downEvent.locationInWindow.x, event.locationInWindow.y - downEvent.locationInWindow.y) >= 5 else { return event }
             activeSource = candidate; self.candidate = nil
-            if candidate.begin(event) { return nil }; activeSource = nil
-        case .leftMouseUp: candidate = nil
+            if candidate.begin(downEvent) { return nil }; activeSource = nil; self.downEvent = nil
+        case .leftMouseUp: candidate = nil; downEvent = nil
         default: break
         }
         return event
