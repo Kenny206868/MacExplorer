@@ -26,16 +26,22 @@ final class JournalDatabase: @unchecked Sendable {
     private var processLock: Int32 = -1
     let directory: URL
     init(directory: URL) throws {
-        self.directory = directory.standardizedFileURL
         guard directory.isFileURL else { throw JournalError.unsafe("The journal must be on a local filesystem.") }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let identity = try JournalIdentity(directory)
         guard identity.isDirectory, identity.owner == me_current_uid(), identity.mode & 0o077 == 0 else {
             throw JournalError.unsafe("The journal directory must be owned by this user with mode 0700.")
         }
-        processLock = me_open_journal_lock(directory.appendingPathComponent("writer.lock").path)
+        // SQLite NOFOLLOW rejects all symbolic path components, including the
+        // macOS /var alias. Validate the leaf, then resolve the parent spelling.
+        let canonical = directory.resolvingSymlinksInPath().standardizedFileURL
+        guard identity.matches(canonical, exact: false) else {
+            throw JournalError.unsafe("The journal directory changed while resolving its path.")
+        }
+        self.directory = canonical
+        processLock = me_open_journal_lock(canonical.appendingPathComponent("writer.lock").path)
         guard processLock >= 0 else { throw JournalError.io("Acquire exclusive recovery writer lock", errno) }
-        let database = directory.appendingPathComponent("operations.sqlite3")
+        let database = canonical.appendingPathComponent("operations.sqlite3")
         for suffix in ["", "-wal", "-shm"] {
             let path = URL(fileURLWithPath: database.path + suffix)
             if let item = try? JournalIdentity(path) {
