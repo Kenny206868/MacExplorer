@@ -73,12 +73,15 @@ public struct OperationReceipt: Identifiable, Codable, Sendable {
     public var date = Date()
     public var title: String
     public var steps: [UndoStep]
+    /// Optional for backwards-compatible decoding of v1 recovery receipts.
+    public var renameBatch: Bool?
     public init(title: String, steps: [UndoStep] = []) { self.title = title; self.steps = steps }
 }
 public struct FileJobResult: Sendable {
     public var receipt: OperationReceipt
     public var errors: [String] = []
     public var outputs: [URL] = []
+    public var completedSources: [URL] = []
     public var remaining: [UndoStep] = []
     public var cancelled = false
     public init(title: String) { receipt = OperationReceipt(title: title) }
@@ -243,6 +246,7 @@ public actor FileOperationEngine {
                     steps = try transfer(job, source: source, target: target, replace: replace, control: control)
                     result.outputs.append(target)
                 }
+                result.completedSources.append(source)
                 result.receipt.steps.insert(contentsOf: steps, at: 0)
                 try record(result.receipt)
             } catch is CancellationError { result.cancelled = true; break }
@@ -254,6 +258,27 @@ public actor FileOperationEngine {
     public func undo(_ receipt: OperationReceipt, control: OperationControl) async -> FileJobResult {
         await acquire(); defer { release() }
         var result = FileJobResult(title: receipt.title)
+        if receipt.renameBatch == true {
+            do {
+                // Validate the complete cycle before staging any member. Sequential
+                // inverse moves cannot restore A↔B swaps or longer rename cycles.
+                for step in receipt.steps {
+                    guard step.kind == .move, let destination = step.destination,
+                          destination.deletingLastPathComponent() == step.source.deletingLastPathComponent(),
+                          step.expected.matches(step.source) else {
+                        throw ExplorerError.message("A renamed item changed or its recorded destination is invalid. Recovery stopped without modifying the batch.")
+                    }
+                }
+                let mapping = receipt.steps.compactMap { step -> (URL, String)? in
+                    step.destination.map { (step.source, $0.lastPathComponent) }
+                }
+                result = performRename(mapping, control: control)
+                if !result.errors.isEmpty || result.cancelled { result.remaining = receipt.steps }
+            } catch {
+                result.errors.append(error.localizedDescription); result.remaining = receipt.steps
+            }
+            return result
+        }
         for (index, step) in receipt.steps.enumerated() {
             do {
                 try control.checkpoint()
@@ -279,7 +304,11 @@ public actor FileOperationEngine {
     /// Two-phase batch rename supports swaps and case-only renames without overwriting siblings.
     public func rename(_ mapping: [(URL, String)], control: OperationControl) async -> FileJobResult {
         await acquire(); defer { release() }
+        return performRename(mapping, control: control)
+    }
+    private func performRename(_ mapping: [(URL, String)], control: OperationControl) -> FileJobResult {
         var result = FileJobResult(title: "Rename")
+        result.receipt.renameBatch = true
         let manager = FileManager.default
         var staged: [(source: URL, stage: URL, target: URL)] = [], installed: [(source: URL, target: URL)] = []
         do {
@@ -309,9 +338,17 @@ public actor FileOperationEngine {
             try record(result.receipt)
         } catch {
             // Move installed entries back to their unique staging names before restoring originals (swaps).
-            for item in staged.reversed() where installed.contains(where: { $0.target == item.target }) { try? manager.moveItem(at: item.target, to: item.stage) }
-            for item in staged where FileNames.exists(item.stage) && !FileNames.exists(item.source) { try? manager.moveItem(at: item.stage, to: item.source) }
-            result.outputs = []; result.receipt.steps = []; result.errors.append(error.localizedDescription)
+            for item in staged.reversed() where installed.contains(where: { $0.target == item.target }) {
+                do { try manager.moveItem(at: item.target, to: item.stage) }
+                catch { result.errors.append("Rollback could not stage \(item.target.path): \(error.localizedDescription)") }
+            }
+            for item in staged where FileNames.exists(item.stage) && !FileNames.exists(item.source) {
+                do { try manager.moveItem(at: item.stage, to: item.source) }
+                catch { result.errors.append("Original remains recoverable at \(item.stage.path): \(error.localizedDescription)") }
+            }
+            result.outputs = []; result.receipt.steps = []
+            if error is CancellationError { result.cancelled = true }
+            else { result.errors.append(error.localizedDescription) }
         }
         return result
     }
