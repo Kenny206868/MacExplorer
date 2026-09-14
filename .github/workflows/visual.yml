@@ -1,17 +1,16 @@
 name: Native visual validation
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_call:
   workflow_dispatch:
 permissions:
   contents: read
-concurrency:
-  group: visual-${{ github.ref }}
-  cancel-in-progress: true
 jobs:
   swiftui:
-    runs-on: ${{ vars.MACOS_VISUAL_RUNNER || 'macos-15-intel' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15-intel, macos-26]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     env:
       TZ: UTC
@@ -21,21 +20,22 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - name: Capture production SwiftUI views without UI automation
+      - name: Capture production SwiftUI views and validate native layout
         run: |
           set -o pipefail
           mkdir -p artifacts/native-views
           xcodebuild -version > artifacts/native-views/toolchain.txt
           swift --version >> artifacts/native-views/toolchain.txt
+          uname -m >> artifacts/native-views/toolchain.txt
           git rev-parse HEAD > artifacts/native-views/COMMIT.txt
-          swift test --filter NativeViewSnapshotTests 2>&1 | tee artifacts/native-views/test.log
+          swift test --filter 'NativeViewSnapshotTests|WorkspaceLayoutIntegrationTests' 2>&1 | tee artifacts/native-views/test.log
       - name: Validate coverage, dimensions, and render content
         run: python3 scripts/validate-snapshots.py artifacts/native-views
       - name: Upload native PNGs, test log, and offline review gallery
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: MacExplorer-native-views
+          name: MacExplorer-native-views-${{ matrix.os }}
           path: artifacts/native-views
           if-no-files-found: error
           retention-days: 30
