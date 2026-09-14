@@ -12,11 +12,16 @@ final class InitialPaneBudgetTests: XCTestCase {
                 XCTAssertGreaterThanOrEqual(widths[0], plan.sidebarMinimum)
                 XCTAssertGreaterThanOrEqual(widths[1], plan.contentMinimum)
                 for auxiliary in widths.dropFirst(2) { XCTAssertGreaterThanOrEqual(auxiliary, plan.auxiliaryMinimum) }
+                let actual = plan.allocate(hasInspector: inspector, hasPreview: preview)
+                XCTAssertGreaterThanOrEqual(actual.content, 350)
+                XCTAssertEqual(actual.sidebar + actual.content + actual.auxiliary + actual.preview + Double(plan.auxiliaryCount + 1), width, accuracy: 0.01)
             } }
         }
     }
     func testDefaultInspectorLeavesRoomForFourFileColumns() {
-        let widths = WorkspaceLayout(width: 1260, preview: false, inspector: true).initialPaneWidths(totalWidth: 1260, dividerThickness: 1)
-        XCTAssertEqual(widths, [208, 780, 270])
+        let plan = WorkspaceLayout(width: 1260, preview: false, inspector: true)
+        XCTAssertEqual(plan.initialPaneWidths(totalWidth: 1260, dividerThickness: 1), [211, 793, 254])
+        let actual = plan.allocate(hasInspector: true, hasPreview: false)
+        XCTAssertEqual(actual.sidebar, 211); XCTAssertEqual(actual.auxiliary, 254); XCTAssertEqual(actual.content, 793)
     }
 }
