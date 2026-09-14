@@ -46,17 +46,28 @@ struct Preferences: Codable {
     let control = OperationControl()
     @Published var progress = FileProgress(completed: 0, total: 1, name: "Queued")
     @Published var status = "Queued"
+    @Published var statistics = TransferStatistics()
+    var cancellationAction: (() -> Void)?
     @Published var errors: [String] = []
     @Published var paused = false
     @Published var finished = false
+    @Published var cancelled = false
     init(id: UUID = UUID(), title: String) { self.id = id; self.title = title }
-    func cancel() { control.cancel(); status = "Cancelling…" }
-    func togglePause() { paused.toggle(); control.setPaused(paused); status = paused ? "Paused (at the next safe checkpoint)" : "Running" }
+    func cancel() { control.cancel(); statistics.suspend(); status = "Cancelling…"; cancellationAction?() }
+    func acceptProgress(_ value: FileProgress) {
+        guard !finished, value.sequence >= progress.sequence, value.timestamp >= progress.timestamp else { return }
+        if value.phase != .copying || progress.phase != .copying { statistics.suspend() }
+        progress = value
+        statistics.record(bytes: value.bytes, at: value.timestamp, paused: paused || value.phase != .copying)
+        if !paused && !control.isCancelled { status = value.phase.rawValue }
+    }
+    func togglePause() { paused.toggle(); statistics.suspend(); control.setPaused(paused); status = paused ? "Paused (at the next safe checkpoint)" : "Running" }
 }
 
 struct ConflictPrompt: Identifiable {
     let id = UUID()
     let collision: FileCollision
+    let operationID: UUID
     let continuation: CheckedContinuation<CollisionAnswer, Never>
 }
 
@@ -71,16 +82,20 @@ struct ConflictPrompt: Identifiable {
     func submit(_ job: FileJob, owner: ExplorerWorkspace, cutTicket: FileClipboard.CutTicket? = nil, completion: ((FileJobResult) -> Void)? = nil) {
         let origin = owner.current, location = owner.current.location
         let row = OperationRow(id: job.id, title: job.title)
+        let control = row.control
         jobs.insert(row, at: 0)
+        row.cancellationAction = { [weak owner] in
+            if owner?.conflict?.operationID == job.id { owner?.answerCollision(.cancel) }
+        }
         Task {
             let result = await FileOperationEngine.shared.run(job, control: row.control, progress: { [weak row] progress in
                 Task { @MainActor in
                     guard let row, !row.finished else { return }
-                    row.progress = progress; if !row.paused { row.status = "Running" }
+                    row.acceptProgress(progress)
                 }
             }, resolve: { [weak owner] collision in
                 guard let owner else { return CollisionAnswer(.cancel) }
-                return await owner.resolve(collision)
+                return await owner.resolve(collision, operationID: job.id, control: control)
             })
             complete(row, result: result)
             if let cutTicket { FileClipboard.shared.finish(cutTicket, moved: result.completedSources) }
@@ -98,8 +113,12 @@ struct ConflictPrompt: Identifiable {
         }
     }
     private func complete(_ row: OperationRow, result: FileJobResult) {
+        if let final = result.finalProgress { row.acceptProgress(final) }
+        row.cancellationAction = nil
+        row.paused = false; row.control.setPaused(false); row.cancelled = result.cancelled || row.control.isCancelled
         row.errors = result.errors; row.finished = true
         row.status = result.cancelled ? "Cancelled — completed items were retained" : result.errors.isEmpty ? "Completed" : "Completed with errors"
+        if !result.skippedSources.isEmpty { row.status += " — \(result.skippedSources.count) skipped" }
         if !result.receipt.steps.isEmpty { undoStack.append(result.receipt); redoStack.removeAll() }
         revision += 1
         // Never discard active jobs or recovery receipts while trimming presentation history.
@@ -111,6 +130,7 @@ struct ConflictPrompt: Identifiable {
         let row = OperationRow(title: (redo ? "Redo " : "Undo ") + receipt.title); jobs.insert(row, at: 0)
         Task {
             let result = await FileOperationEngine.shared.undo(receipt, control: row.control)
+            row.cancelled = result.cancelled || row.control.isCancelled
             row.finished = true; row.errors = result.errors; row.status = result.errors.isEmpty ? "Completed" : "Stopped to protect changes"
             if !result.receipt.steps.isEmpty { if redo { undoStack.append(result.receipt) } else { redoStack.append(result.receipt) } }
             if !result.remaining.isEmpty {
@@ -156,7 +176,7 @@ enum ExplorerSheet: String, Identifiable { case newFolder, newFile, rename, prop
             return
         }
         let p = PreferenceStore.shared
-        let locations = p.value.restoreTabs && !p.value.tabs.isEmpty ? p.value.tabs : [.home]
+        let locations: [Location] = p.value.restoreTabs && !p.value.tabs.isEmpty ? p.value.tabs : [p.value.startLocation == "This Mac" ? .computer : .home]
         let initial = locations.prefix(20).map { BrowserTab($0) }
         tabs = initial; activeID = initial[0].id
         observeCurrentTab()
@@ -184,7 +204,7 @@ enum ExplorerSheet: String, Identifiable { case newFolder, newFile, rename, prop
     func openURLs(_ urls: [URL]) {
         for url in urls {
             if let entry = try? FileEntry(url: url), entry.canBrowse { navigate(.folder(url), newTab: !current.entries.isEmpty) }
-            else { navigate(.folder(url.deletingLastPathComponent())); current.selection = [url] }
+            else { navigate(.folder(url.deletingLastPathComponent())); current.refresh(selecting: [url]) }
         }
     }
     func goToAddress(_ text: String) {
@@ -219,11 +239,12 @@ enum ExplorerSheet: String, Identifiable { case newFolder, newFile, rename, prop
     func alias() { guard let destination else { return }; operations.submit(FileJob(.symbolicLink, sources: selectedURLs, destination: destination, names: Dictionary(uniqueKeysWithValues: selectedURLs.map { ($0.path, $0.lastPathComponent + " link") })), owner: self) }
     func quickLook() { current.previewURL = selectedURLs.first }
     func fail(_ title: String, _ text: String) { message = MessageBox(title: title, message: text) }
-    func resolve(_ collision: FileCollision) async -> CollisionAnswer {
+    func resolve(_ collision: FileCollision, operationID: UUID, control: OperationControl) async -> CollisionAnswer {
+        guard !control.isCancelled else { return CollisionAnswer(.cancel) }
         // Never suspend the global operation queue behind a prompt in a closed window.
         guard window?.isVisible == true else { return CollisionAnswer(.cancel) }
         sheet = nil
-        return await withCheckedContinuation { continuation in conflict = ConflictPrompt(collision: collision, continuation: continuation) }
+        return await withCheckedContinuation { continuation in conflict = ConflictPrompt(collision: collision, operationID: operationID, continuation: continuation) }
     }
     func answerCollision(_ choice: CollisionChoice, all: Bool = false) {
         guard let prompt = conflict else { return }; conflict = nil

@@ -2,9 +2,11 @@
 
 ## Copy workflow
 
-A copy now inventories logical size with cancellable traversal, then uses `NativeFileCopy` inside a private `0700` staging directory. Progress carries separate cumulative data bytes, logical completion, clone counts, an optional size estimate, successful top-level item count, phase, monotonic timestamp and delivery sequence. Native callbacks deliver at most ten normal updates per second; cancellation is checked independently at each callback. The final progress snapshot is part of the operation result, so completion need not race and discard the last UI update. SwiftUI presentation is integrated in the next focused commit.
+A copy now inventories logical size with cancellable traversal, then uses `NativeFileCopy` inside a private `0700` staging directory. UI progress carries separate cumulative data bytes, logical completion, clone counts, an optional size estimate, successful top-level item count, phase, monotonic timestamp and delivery sequence. Native callbacks deliver at most ten normal updates per second; cancellation is checked independently at each callback. The final progress snapshot is part of the operation result, so completion cannot race and discard the last UI update.
 
-The data counter is what `copyfile` reports, not a physical disk/network utilization meter. Clone acceleration and sparse files can make logical progress diverge from copied data. Size estimation failures make the total indeterminate, not a false exact count. Skipped sources remain explicit in the result, separate from completed sources used by cut-paste consumption.
+The SwiftUI operation card renders measured throughput history, logical bytes completed, selected size, clone count and an estimated remaining time. Missing totals, insufficient samples, pauses, prompts and stale filesystem callbacks do not produce invented rates or ETAs. The chart retains at most 120 samples. Its data counter is what `copyfile` reports, not a physical disk/network utilization meter. Clone acceleration and sparse files can make logical progress diverge from copied data.
+
+The serialized gate, queue, progress/cancel controls and durable recovery receipts are shared across all windows. A cancellation action is associated with its operation ID; it resumes only that operation's pending collision prompt. A queued job cannot dismiss an unrelated job's prompt. Skipped sources remain explicit in the result and UI, separate from completed sources used by cut-paste consumption.
 
 ## Commit and rollback safety
 
