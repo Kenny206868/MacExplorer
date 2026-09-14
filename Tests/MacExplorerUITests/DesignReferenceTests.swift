@@ -61,8 +61,9 @@ final class DesignReferenceTests: XCTestCase {
                 try assertColor(bitmap, point: CGPoint(x: inspector.minX + 4, y: 735), rgb: dark ? 0x202228 : 0xFFFFFF, label: captureName + " inspector canvas")
                 if name == "details" {
                     let frame = try XCTUnwrap(geometry["files"]), index = try XCTUnwrap(tab.displayEntries.firstIndex { $0.url == entries[3].url })
-                    // Stay inside the row, outside native legacy scrollbar tracks.
-                    try assertColor(bitmap, point: CGPoint(x: frame.maxX - 26, y: frame.minY + 34 + CGFloat(index) * 36 + 18), rgb: dark ? 0x153E6D : 0xE4F0FF, label: captureName + " selected row")
+                    // The four-point leading row inset contains neither text nor
+                    // native scroller pixels. Keep the actual reference RGB values.
+                    try assertColor(bitmap, point: CGPoint(x: frame.minX + 4, y: frame.minY + 34 + CGFloat(index) * 36 + 18), rgb: dark ? 0x153E6D : 0xE4F0FF, label: captureName + " selected row")
                     try assertColor(bitmap, point: CGPoint(x: frame.minX + 35, y: 720), rgb: dark ? 0x202228 : 0xFFFFFF, label: captureName + " no empty zebra rows")
                 }
                 evidence.append(["capture": captureName, "geometry": "211 sidebar / 793 files / 254 inspector", "palette": "encoded sRGB surface and selection channels checked"])

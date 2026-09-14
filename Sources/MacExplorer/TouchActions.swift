@@ -34,14 +34,21 @@ struct FileActionSheet: View {
     }
     private func action(_ title: String, _ symbol: String, perform: @escaping () -> Void) -> some View {
         Button {
-            workspace.sheet = nil
-            // Present another native sheet only after the current one dismisses.
-            Task { @MainActor in try? await Task.sleep(for: .milliseconds(250)); perform() }
+            do {
+                let snapshot = try FileActionSnapshot(workspace)
+                workspace.sheet = nil
+                Task { @MainActor in
+                    do {
+                        try await Task.sleep(for: .milliseconds(250))
+                        try snapshot.validate(); perform()
+                    } catch is CancellationError { }
+                    catch { workspace.fail("File action stopped", error.localizedDescription) }
+                }
+            } catch { workspace.sheet = nil; workspace.fail("File action unavailable", error.localizedDescription) }
         } label: { Label(title, systemImage: symbol).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading) }
             .buttonStyle(ExplorerButtonStyle())
     }
 }
-
 struct KeyboardHelpView: View {
     @Environment(\.dismiss) private var dismiss
     private let shortcuts: [(String, String)] = [
@@ -60,7 +67,9 @@ struct KeyboardHelpView: View {
         ("Alt + Left / Right / Up", "Back / Forward / Parent folder"),
         ("Cmd/Ctrl + T / W", "New tab / Close tab"),
         ("Cmd/Ctrl + Shift + T", "Reopen the last closed tab"),
-        ("Ctrl + Tab · Cmd/Ctrl + 1…9", "Cycle or select tabs in the active pane"),
+        ("Ctrl + Tab / Page Up/Down", "Cycle tabs in the active pane"),
+        ("Cmd/Ctrl + 1…9", "Select a tab in the active pane"),
+        ("Cmd/Ctrl + plus / minus", "Change file-view density"),
         ("Cmd/Ctrl + X / C / V", "Cut / Copy / Paste"),
         ("Cmd/Ctrl + Z · Ctrl + Y", "Undo / Redo"),
         ("Delete / Shift + Delete", "Trash / Confirm permanent deletion"),
