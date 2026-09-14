@@ -52,7 +52,7 @@ import ExplorerCore
         if key == 115 || key == 119 {
             selectBoundary(last: key == 119, extend: shift, focusOnly: control && !shift)
         } else {
-            let stride = [.details, .list, .content].contains(current.options.view) ? 1 : max(1, current.gridColumns)
+            let stride = [.details, .list, .content, .gallery].contains(current.options.view) ? 1 : max(1, current.gridColumns)
             let delta = key == 123 ? -1 : key == 124 ? 1 : key == 126 ? -stride : stride
             moveSelection(delta, extend: shift, focusOnly: control && !shift)
         }

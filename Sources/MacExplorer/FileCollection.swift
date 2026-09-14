@@ -6,13 +6,17 @@ struct FileCollection: View {
     @ObservedObject var workspace: ExplorerWorkspace
     @ObservedObject var tab: BrowserTab
     var body: some View {
-        if tab.options.view == .details && tab.options.group == .none { FileDetailsTable(workspace: workspace, tab: tab) }
-        else if [.content, .list].contains(tab.options.view) {
-            List(selection: $tab.selection) {
-                ForEach(Array(tab.groups.enumerated()), id: \.offset) { _, group in
-                    Section { ForEach(group.1) { entry in FileWideRow(entry: entry, workspace: workspace, tab: tab).tag(entry.url) } } header: { if !group.0.isEmpty { Text(group.0) } }
-                }
-            }.listStyle(.inset)
+        if tab.options.view == .gallery { FileGalleryView(workspace: workspace, tab: tab) }
+        else if tab.options.view == .details && tab.options.group == .none { FileDetailsTable(workspace: workspace, tab: tab) }
+        else if [.content, .list, .details].contains(tab.options.view) {
+            ScrollViewReader { proxy in
+                List(selection: $tab.selection) {
+                    ForEach(Array(tab.groups.enumerated()), id: \.offset) { _, group in
+                        Section { ForEach(group.1) { entry in FileWideRow(entry: entry, workspace: workspace, tab: tab).tag(entry.url).id(entry.url) } } header: { if !group.0.isEmpty { Text(group.0) } }
+                    }
+                }.listStyle(.inset)
+                    .onChange(of: tab.focusedURL) { _, url in if let url { proxy.scrollTo(url) } }
+            }
         } else { FileGridView(workspace: workspace, tab: tab) }
     }
 }
