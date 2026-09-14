@@ -25,9 +25,7 @@ import AppKit
                                 Text("No matching commands").font(.system(size: 15, weight: .semibold))
                                 Text("Try a task such as “new folder”, “split”, or “hidden”.").font(.system(size: 12)).foregroundStyle(ExplorerDesign.muted)
                             }.frame(maxWidth: .infinity).padding(.top, 90)
-                        } else {
-                            ForEach(model.matches) { command in row(command).id(command) }
-                        }
+                        } else { ForEach(model.matches) { command in row(command).id(command) } }
                     }.padding(10)
                 }.onChange(of: model.selection) { _, selected in if let selected { scroll.scrollTo(selected) } }
             }
@@ -65,26 +63,10 @@ import AppKit
         }.padding(.horizontal, 22).frame(height: 64)
     }
     private func row(_ command: ExplorerCommand) -> some View {
-        let spec = command.spec, reason = command.unavailable(in: workspace), selected = model.selection == command
-        return Button { model.selection = command; runSelected() } label: {
-            HStack(spacing: 13) {
-                Image(systemName: spec.symbol).font(.system(size: 15)).frame(width: 28).foregroundStyle(reason == nil ? Color.accentColor : ExplorerDesign.muted)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(spec.title).font(.system(size: 13, weight: selected ? .semibold : .regular)).lineLimit(1)
-                    Text(reason ?? spec.category).font(.system(size: 10)).foregroundStyle(ExplorerDesign.muted).lineLimit(1)
-                }
-                Spacer(minLength: 12)
-                if !spec.shortcut.isEmpty { Text(spec.shortcut).font(.system(size: 11, design: .monospaced)).foregroundStyle(ExplorerDesign.muted) }
-                if reason != nil { Image(systemName: "minus.circle").font(.system(size: 11)).foregroundStyle(ExplorerDesign.muted) }
-            }.padding(.horizontal, 12).frame(height: input.touchFriendly ? 56 : 48)
-                .background(selected ? ExplorerDesign.selection : .clear, in: RoundedRectangle(cornerRadius: 7))
-                .overlay(RoundedRectangle(cornerRadius: 7).stroke(selected ? Color.accentColor.opacity(0.3) : .clear, lineWidth: 1))
-                .contentShape(Rectangle())
-        }.buttonStyle(.plain)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(spec.title + ", " + (reason ?? spec.category) + (spec.shortcut.isEmpty ? "" : ", " + spec.shortcut))
-            .accessibilityAddTraits(selected ? .isSelected : [])
-            .accessibilityHint(reason ?? "Run this command in the pane shown above")
+        CommandPaletteRow(command: command, reason: command.unavailable(in: workspace),
+                          selected: model.selection == command, touch: input.touchFriendly) {
+            model.selection = command; runSelected()
+        }
     }
     private var footer: some View {
         HStack(spacing: 10) {
@@ -105,5 +87,45 @@ import AppKit
         guard let command = model.selection else { return }
         do { let invocation = try CommandInvocation(command, workspace: workspace); error = nil; invocation.enqueue() }
         catch { self.error = error.localizedDescription }
+    }
+}
+
+@MainActor private struct CommandPaletteRow: View {
+    let command: ExplorerCommand
+    let reason: String?
+    let selected: Bool
+    let touch: Bool
+    let action: () -> Void
+    private var spec: (title: String, category: String, symbol: String, shortcut: String, aliases: String) { command.spec }
+    private var accessibilityText: String {
+        var value = spec.title + ", " + (reason ?? spec.category)
+        if !spec.shortcut.isEmpty { value += ", " + spec.shortcut }
+        return value
+    }
+    var body: some View {
+        Button(action: action) { surface }.buttonStyle(.plain)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(accessibilityText)
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            .accessibilityHint(reason ?? "Run this command in the pane shown above")
+    }
+    private var surface: some View {
+        content.padding(.horizontal, 12).frame(height: touch ? 56 : 48)
+            .background(selected ? ExplorerDesign.selection : .clear, in: RoundedRectangle(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(selected ? Color.accentColor.opacity(0.3) : .clear, lineWidth: 1))
+            .contentShape(Rectangle())
+    }
+    private var content: some View {
+        HStack(spacing: 13) {
+            Image(systemName: spec.symbol).font(.system(size: 15)).frame(width: 28)
+                .foregroundStyle(reason == nil ? Color.accentColor : ExplorerDesign.muted)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(spec.title).font(.system(size: 13, weight: selected ? .semibold : .regular)).lineLimit(1)
+                Text(reason ?? spec.category).font(.system(size: 10)).foregroundStyle(ExplorerDesign.muted).lineLimit(1)
+            }
+            Spacer(minLength: 12)
+            if !spec.shortcut.isEmpty { Text(spec.shortcut).font(.system(size: 11, design: .monospaced)).foregroundStyle(ExplorerDesign.muted) }
+            if reason != nil { Image(systemName: "minus.circle").font(.system(size: 11)).foregroundStyle(ExplorerDesign.muted) }
+        }
     }
 }
