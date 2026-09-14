@@ -53,7 +53,7 @@ public final class FileJournal: @unchecked Sendable {
     func released(_ id: UUID) { stateLock.lock(); active.remove(id); stateLock.unlock() }
     public func summaries(unfinishedOnly: Bool = true, limit: Int = 100) throws -> [JournalSummary] {
         stateLock.lock(); defer { stateLock.unlock() }
-        let predicate = unfinishedOnly ? "WHERE state NOT IN ('finished','recovered')" : ""
+        let predicate = unfinishedOnly ? "WHERE state NOT IN ('finished','recovered','acknowledged')" : ""
         let rows = try database.query("SELECT id,title,started,state,warning,receipt,(SELECT count(*) FROM mutations m WHERE m.operation=operations.id AND m.id>operations.checkpoint AND m.phase NOT IN ('reverted','aborted','reviewed')) FROM operations \(predicate) ORDER BY started DESC LIMIT ?", [.integer(Int64(max(1, min(limit, 1000))))])
         return try rows.map { row in
             guard row.count == 7, let id = row[0].string.flatMap(UUID.init(uuidString:)), let title = row[1].string,
@@ -63,14 +63,19 @@ public final class FileJournal: @unchecked Sendable {
         }
     }
     public func receipts(limit: Int = 1000) throws -> [Data] {
-        try database.query("SELECT receipt FROM operations WHERE receipt IS NOT NULL ORDER BY started DESC LIMIT ?", [.integer(Int64(max(1, min(limit, 10_000))))]).compactMap { $0.first?.data }
+        try database.query("SELECT receipt FROM (SELECT rowid AS sequence,receipt FROM operations WHERE receipt IS NOT NULL ORDER BY rowid DESC LIMIT ?) ORDER BY sequence ASC", [.integer(Int64(max(1, min(limit, 10_000))))]).compactMap { $0.first?.data }
     }
-    public func recover(_ id: UUID) throws -> JournalRecoveryResult {
+    public func recover(_ id: UUID) throws -> JournalRecoveryResult { try recover(id, continuing: false) }
+    /// The engine holds its serialization gate during active compensation.
+    /// Public recovery still refuses an active transaction.
+    fileprivate func recover(_ id: UUID, continuing: Bool) throws -> JournalRecoveryResult {
         stateLock.lock(); defer { stateLock.unlock() }
-        guard !active.contains(id) else { throw JournalError.conflict("This operation is still active.") }
+        guard continuing || !active.contains(id) else { throw JournalError.conflict("This operation is still active.") }
         let header = try database.query("SELECT state,receipt,checkpoint FROM operations WHERE id=?", [.text(id.uuidString)]).first
         guard let header, let state = header[0].string else { throw JournalError.database("Recovery operation was not found.") }
-        if state == "finished" || state == "recovered" { return JournalRecoveryResult(receipt: header[1].data, retainedArtifacts: [], notices: [], resolved: true) }
+        if ["finished", "recovered", "acknowledged"].contains(state) {
+            return JournalRecoveryResult(receipt: header[1].data, retainedArtifacts: [], notices: [], resolved: true)
+        }
         let rows = try database.query("SELECT id,kind,phase,payload,outcome FROM mutations WHERE operation=? AND id>? ORDER BY id DESC", [.text(id.uuidString), .integer(header[2].integer ?? 0)])
         var artifacts: [URL] = [], notices: [String] = []
         for row in rows {
@@ -115,13 +120,26 @@ public final class FileJournal: @unchecked Sendable {
                 return JournalRecoveryResult(receipt: header[1].data, retainedArtifacts: artifacts, notices: notices, resolved: false)
             }
         }
-        try database.execute("UPDATE operations SET state='recovered',warning=? WHERE id=?", [.text(notices.joined(separator: "\n")), .text(id.uuidString)])
+        if continuing {
+            try database.execute("UPDATE operations SET state='running',warning=?,checkpoint=coalesce((SELECT max(id) FROM mutations WHERE operation=?),checkpoint) WHERE id=?", [.text(notices.joined(separator: "\n")), .text(id.uuidString), .text(id.uuidString)])
+        } else {
+            try database.execute("UPDATE operations SET state='recovered',warning=? WHERE id=?", [.text(notices.joined(separator: "\n")), .text(id.uuidString)])
+        }
         return JournalRecoveryResult(receipt: header[1].data, retainedArtifacts: artifacts, notices: notices, resolved: true)
     }
-    private func recoverMove(_ move: JournalMove, mutation: Int64) throws {
-        if move.matches(move.source), (try? JournalIdentity(move.destination)) == nil {
-            try setPhase(mutation, "reverted"); return
+    /// Explicit user acceptance retains data and the audit record; it is not a
+    /// retry, a guessed rollback, or permission to delete retained objects.
+    public func acknowledge(_ id: UUID) throws {
+        stateLock.lock(); defer { stateLock.unlock() }
+        guard !active.contains(id) else { throw JournalError.conflict("This operation is still active.") }
+        guard let row = try database.query("SELECT state FROM operations WHERE id=?", [.text(id.uuidString)]).first,
+              let state = row.first?.string, !["finished", "recovered"].contains(state) else {
+            throw JournalError.conflict("This operation does not require acknowledgement.")
         }
+        try database.execute("UPDATE operations SET state='acknowledged',warning='User accepted the current filesystem without automatic compensation' WHERE id=?", [.text(id.uuidString)])
+    }
+    private func recoverMove(_ move: JournalMove, mutation: Int64) throws {
+        if move.matches(move.source), (try? JournalIdentity(move.destination)) == nil { try setPhase(mutation, "reverted"); return }
         guard (try? JournalIdentity(move.source)) == nil, move.matches(move.destination) else {
             throw JournalError.conflict("The original path is occupied or the moved object changed: \(move.source.path)")
         }
@@ -147,8 +165,6 @@ public final class JournalTransaction: @unchecked Sendable {
         try journalRename(intent, reverse: false); journal.fault?(.filesystemApplied)
         try journal.setPhase(mutation, "applied"); journal.fault?(.appliedCommitted)
     }
-    /// Log private staging before creation. Recovery never recursively removes
-    /// an arbitrary path merely because that path appears in the database.
     public func registerArtifact(_ path: URL) throws {
         lock.lock(); defer { lock.unlock() }
         try JournalIdentity.validatePath(path)
@@ -157,8 +173,8 @@ public final class JournalTransaction: @unchecked Sendable {
         guard parent.isDirectory, (try? JournalIdentity(path)) == nil else { throw JournalError.unsafe("Staging destination must be absent.") }
         _ = try prepare("artifact", payload: JSONEncoder().encode(ArtifactIntent(path: path, parent: parent, identity: nil)))
     }
-    /// Native Trash and irreversible deletion do not transact with SQLite.
-    /// Unknown crash outcomes remain explicit review items, never guessed/replayed.
+    /// Native OS outcomes do not transact with SQLite. Unknown outcomes are
+    /// explicit review items, never guessed or replayed after a process crash.
     public func external(_ kind: String, source: URL, operation: () throws -> URL?) throws -> URL? {
         lock.lock(); defer { lock.unlock() }
         guard kind == "trash" || kind == "delete" else { throw JournalError.unsafe("Unknown external operation.") }
@@ -175,6 +191,13 @@ public final class JournalTransaction: @unchecked Sendable {
         guard !finished else { throw JournalError.unsafe("Transaction already finished.") }
         try journal.database.execute("UPDATE operations SET receipt=?,checkpoint=coalesce((SELECT max(id) FROM mutations WHERE operation=?),0) WHERE id=?", [.blob(receipt), .text(id.uuidString), .text(id.uuidString)])
         journal.fault?(.checkpointCommitted)
+    }
+    /// Compensate only mutations after the durable receipt, then continue with
+    /// the next independently committed item under the same active ownership.
+    public func rollbackToCheckpoint() throws -> JournalRecoveryResult {
+        lock.lock(); defer { lock.unlock() }
+        guard !finished else { throw JournalError.unsafe("Transaction already finished.") }
+        return try journal.recover(id, continuing: true)
     }
     public func finish(receipt: Data?, needsReview: Bool = false, warning: String? = nil) throws {
         lock.lock(); defer { lock.unlock() }
