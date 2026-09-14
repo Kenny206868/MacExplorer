@@ -1,4 +1,4 @@
-name: Publish development preview
+name: Publish alpha preview
 on:
   workflow_run:
     workflows: ['CI']
@@ -7,7 +7,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: preview-${{ github.event.workflow_run.head_sha }}
+  group: alpha-${{ github.event.workflow_run.head_sha }}
   cancel-in-progress: false
 jobs:
   publish:
@@ -27,74 +27,42 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           persist-credentials: false
-      - name: Download only this run's verified universal artifact
+      - name: Fetch this run's native application and both native view galleries
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ github.event.workflow_run.id }}
-          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
-          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$RUN_ID" =~ ^[0-9]+$ ]]
-          [[ "$(git rev-parse HEAD)" == "$SOURCE_SHA" ]]
           gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name MacExplorer-universal --dir native
-          (cd native && sha256sum -c SHA256SUMS)
-          test -f native/INSTALL.md
-      - name: Assemble source, design and native distribution together
+          for platform in macos-15-intel macos-26; do
+            gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name "MacExplorer-native-views-$platform" --dir "views/MacExplorer-native-views-$platform"
+          done
+      - name: Verify and assemble matching distributions and visual evidence
         env:
           SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
           BUILD_URL: ${{ github.event.workflow_run.html_url }}
+          ALPHA_NUMBER: ${{ github.event.workflow_run.run_number }}
         run: |
           set -euo pipefail
-          mkdir -p preview
-          cp native/*.zip native/*.dmg native/INSTALL.md preview/
-          git archive --format=zip --prefix=MacExplorer/ --output=preview/MacExplorer-source.zip HEAD
-          (cd Design && zip -q -r ../preview/MacExplorer-design.zip .)
-          printf '%s\n' "$SOURCE_SHA" > preview/COMMIT.txt
-          printf '%s\n' "$BUILD_URL" > preview/BUILD.txt
-          python3 - <<'PY'
-          import json, os, pathlib
-          root = pathlib.Path('preview')
-          manifest = {
-              'schemaVersion': 1,
-              'channel': 'development-preview',
-              'sourceCommit': os.environ['SOURCE_SHA'],
-              'buildURL': os.environ['BUILD_URL'],
-              'architectures': ['arm64', 'x86_64'],
-              'minimumMacOS': '14.0',
-              'signing': 'ad-hoc',
-              'notarized': False,
-              'automaticUpdateFeed': False,
-              'files': sorted(p.name for p in root.iterdir() if p.is_file()),
-          }
-          (root / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
-          PY
-          (cd preview && sha256sum *.zip *.dmg INSTALL.md COMMIT.txt BUILD.txt manifest.json > SHA256SUMS)
-          {
-            printf '## Development preview\n\n'
-            printf 'Source commit: `%s`\n\n' "$SOURCE_SHA"
-            printf '[Successful native build and core tests](%s).\n\n' "$BUILD_URL"
-            printf 'This is an **ad-hoc-signed development build, not Apple notarized**. It is not a production certification or a claim of complete Windows/Finder parity. Read `INSTALL.md` before opening the app.\n\n'
-            printf 'The ZIP and DMG contain the same universal app built by the linked CI run. Source and interactive-design ZIPs match the same commit. `SHA256SUMS` and `manifest.json` provide provenance.\n\n'
-            printf 'This prerelease does **not** publish or replace the signed Sparkle appcast, change the production latest release, or load Apple/Sparkle signing secrets. Production updates continue to use the explicit version-tag release workflow.\n'
-          } > preview-notes.md
-      - name: Publish once, draft first, without moving existing tags
+          python3 scripts/assemble-alpha.py --native native --views views --output alpha --commit "$SOURCE_SHA" --build "$BUILD_URL" --number "$ALPHA_NUMBER"
+      - name: Publish alpha without moving an existing tag or stable feed
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+          ALPHA_NUMBER: ${{ github.event.workflow_run.run_number }}
         run: |
           set -euo pipefail
-          TAG="preview-$SOURCE_SHA"
-          TITLE="Development preview ${SOURCE_SHA:0:12}"
+          TAG="alpha-$SOURCE_SHA"
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,targetCommitish > existing.json 2>/dev/null; then
-            [[ "$(jq -r .targetCommitish existing.json)" == "$SOURCE_SHA" ]] || { echo 'Existing tag/release targets a different commit; refusing to overwrite.'; exit 1; }
+            [[ "$(jq -r .targetCommitish existing.json)" == "$SOURCE_SHA" ]] || { echo 'Refusing to overwrite another commit.'; exit 1; }
             if [[ "$(jq -r .isDraft existing.json)" == false ]]; then
-              printf 'Preview already published: https://github.com/%s/releases/tag/%s\n' "$GITHUB_REPOSITORY" "$TAG" >> "$GITHUB_STEP_SUMMARY"
+              echo "Alpha already published: $TAG" >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
           else
-            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$SOURCE_SHA" --draft --prerelease --latest=false --title "$TITLE" --notes-file preview-notes.md
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$SOURCE_SHA" --draft --prerelease --latest=false --title "Alpha $ALPHA_NUMBER · ${SOURCE_SHA:0:12}" --notes-file alpha-notes.md
           fi
-          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" preview/* --clobber
-          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease --latest=false --notes-file preview-notes.md
-          printf 'Published immutable development preview: https://github.com/%s/releases/tag/%s\n' "$GITHUB_REPOSITORY" "$TAG" >> "$GITHUB_STEP_SUMMARY"
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" alpha/* --clobber
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease --latest=false --notes-file alpha-notes.md
+          printf 'Published alpha: https://github.com/%s/releases/tag/%s\n' "$GITHUB_REPOSITORY" "$TAG" >> "$GITHUB_STEP_SUMMARY"
