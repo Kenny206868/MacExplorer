@@ -53,8 +53,16 @@ final class NativeCopyTests: XCTestCase {
             if sample.writtenBytes > 0 { control.cancel() }
         }) { XCTAssertTrue($0 is CancellationError) }
         XCTAssertEqual(try Data(contentsOf: source).count, 16 * 1024 * 1024)
-        // This low-level API leaves its private partial destination for the
-        // enclosing transaction to clean; it never removes or mutates the source.
+        // The enclosing transaction owns cleanup of the private partial destination.
+    }
+    func testCancellationFromFinalProgressIsObservedBeforeReturning() throws {
+        let root = try fixture(), source = root.appendingPathComponent("tiny"), destination = root.appendingPathComponent("stage")
+        try Data("payload".utf8).write(to: source)
+        let control = OperationControl()
+        XCTAssertThrowsError(try NativeFileCopy.copy(from: source, to: destination, control: control) { sample in
+            if sample.logicalBytes > 0 { control.cancel() }
+        }) { XCTAssertTrue($0 is CancellationError) }
+        XCTAssertEqual(try String(contentsOf: source), "payload")
     }
     func testAlreadyCancelledDoesNotCreateDestination() throws {
         let root = try fixture(), source = root.appendingPathComponent("file"), destination = root.appendingPathComponent("copy")

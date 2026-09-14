@@ -59,6 +59,9 @@ public enum NativeFileCopy {
         }
         try control.checkpoint() // A cancellation after cloning still prevents installation.
         context.emit(force: true)
+        // Observers may cancel from the final unthrottled progress notification.
+        // Completion is not permission to install a cancelled staging object.
+        try control.checkpoint()
         return context.snapshot
     }
 
@@ -98,6 +101,8 @@ public enum NativeFileCopy {
             if let state, copyfile_state_get(state, UInt32(COPYFILE_STATE_WAS_CLONED), &cloned) == 0, cloned { context.clonedFiles += 1 }
         }
         context.emit(force: false)
+        do { try context.control.checkpoint() }
+        catch { context.failure = error; return Int32(COPYFILE_QUIT) }
         return Int32(COPYFILE_CONTINUE)
     }
     private static func saturatingAdd(_ a: Int64, _ b: Int64) -> Int64 {
