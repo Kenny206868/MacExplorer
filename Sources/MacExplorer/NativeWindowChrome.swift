@@ -47,7 +47,7 @@ import ExplorerCore
         let item: NSToolbarItem
         if action.isMenu {
             let menuItem = NSMenuToolbarItem(itemIdentifier: identifier)
-            menuItem.menu = menu(action); menuItem.showsIndicator = true; item = menuItem
+            menuItem.menu = menu(action); item = menuItem
         } else {
             item = NSToolbarItem(itemIdentifier: identifier)
             item.target = self; item.action = #selector(invokeToolbar(_:))
