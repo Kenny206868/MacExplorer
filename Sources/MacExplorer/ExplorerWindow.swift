@@ -57,7 +57,7 @@ struct ExplorerWindow: View {
     }
     private func refreshVisible() { if let dual = workspace.dualPane { dual.refreshVisible() } else { workspace.current.refresh() } }
 }
-private struct WorkspaceDialogs: ViewModifier {
+struct WorkspaceDialogs: ViewModifier {
     @ObservedObject var workspace: ExplorerWorkspace
     func body(content: Content) -> some View {
         content.sheet(item: $workspace.sheet, onDismiss: { DeferredSheetAction.shared.didDismiss(workspace) }) { sheet in ExplorerSheetView(sheet: sheet, workspace: workspace) }
