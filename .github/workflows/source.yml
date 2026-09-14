@@ -1,0 +1,31 @@
+name: Source and design bundles
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: source-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  bundles:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Package exact committed source and self-contained design
+        run: |
+          mkdir -p bundles
+          git archive --format=zip --prefix=MacExplorer/ --output=bundles/MacExplorer-source.zip HEAD
+          (cd Design && zip -q -r ../bundles/MacExplorer-design.zip .)
+          printf '%s\n' "$GITHUB_SHA" > bundles/COMMIT.txt
+          (cd bundles && sha256sum *.zip > SHA256SUMS)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: MacExplorer-source-and-design
+          path: bundles/*
+          if-no-files-found: error
+          retention-days: 30
