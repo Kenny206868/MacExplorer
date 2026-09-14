@@ -1,4 +1,5 @@
 import XCTest
+import CoreGraphics
 @testable import ExplorerCore
 final class GridGeometryTests: XCTestCase {
     func testHitTestingRespectsGapsAndHeaders() throws {
