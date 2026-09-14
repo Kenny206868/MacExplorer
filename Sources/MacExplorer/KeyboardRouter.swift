@@ -3,20 +3,17 @@ import ExplorerCore
 
 extension Notification.Name { static let explorerNewWindow = Notification.Name("MacExplorer.newWindow") }
 
-/// One command path for every SwiftUI file surface. Editors and native modal
-/// surfaces keep their own event domains; file keys target only the active pane.
 @MainActor enum KeyboardRouter {
     static func handle(_ event: NSEvent) -> NSEvent? {
-        guard let workspace = AppRouter.shared.active, event.window == workspace.window,
-              event.window?.attachedSheet == nil, workspace.sheet == nil, workspace.conflict == nil,
-              workspace.message == nil, workspace.pendingDeletion.isEmpty, workspace.windowRoot.pendingPaneTransfer == nil else { return event }
+        guard let workspace = WorkspaceCommandScope.target(AppRouter.shared.active), event.window === workspace.window else { return event }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let control = flags.contains(.control), command = flags.contains(.command), shift = flags.contains(.shift), option = flags.contains(.option)
+        // VoiceOver's Control-Option modifier is never a file-command chord.
+        // Option-only international character composition also passes through.
+        guard !(control && option) else { return event }
         let text = event.charactersIgnoringModifiers?.lowercased() ?? ""
-        if control && event.keyCode == 48 { workspace.cycleTab(shift ? -1 : 1); return nil }
-        if control && !command && !option && (event.keyCode == 116 || event.keyCode == 121) {
-            workspace.cycleTab(event.keyCode == 116 ? -1 : 1); return nil
-        }
+        if control && !command && event.keyCode == 48 { workspace.cycleTab(shift ? -1 : 1); return nil }
+        if control && !command && (event.keyCode == 116 || event.keyCode == 121) { workspace.cycleTab(event.keyCode == 116 ? -1 : 1); return nil }
         if event.keyCode == 97 && !command && !control && !option { workspace.cycleFocus(backwards: shift); return nil }
         let editing = event.window?.firstResponder is NSTextView || event.window?.firstResponder is NSTextField
         if editing {
@@ -24,7 +21,7 @@ extension Notification.Name { static let explorerNewWindow = Notification.Name("
                 if workspace.searchFocused && !workspace.current.query.isEmpty { workspace.current.query = "" }
                 else { workspace.focusFileSurface() }; return nil
             }
-            if control && !command && !option {
+            if control && !command {
                 let editor = event.window?.firstResponder
                 let selectors = ["c": "copy:", "x": "cut:", "v": "paste:", "a": "selectAll:"]
                 if let action = selectors[text] { _ = NSApp.sendAction(NSSelectorFromString(action), to: editor, from: nil); return nil }
@@ -36,11 +33,11 @@ extension Notification.Name { static let explorerNewWindow = Notification.Name("
         }
         if command && !control && !option && ["+", "=", "-"].contains(text) { workspace.zoomFileView(text == "-" ? -1 : 1); return nil }
         if (command || control) && shift && text == "d" && !option { workspace.toggleDualPane(); return nil }
-        if (command || control) && option && (text == "c" || text == "m") {
+        if command && option && (text == "c" || text == "m") {
             workspace.paneController?.requestTransfer(from: workspace, move: text == "m"); return nil
         }
         if (command || control), let number = Int(text), (1...9).contains(number), !option { workspace.selectTab(number: number); return nil }
-        if option && !command && !control {
+        if option && !command {
             switch event.keyCode {
             case 123: workspace.current.back(); return nil
             case 124: workspace.current.forward(); return nil
@@ -49,9 +46,11 @@ extension Notification.Name { static let explorerNewWindow = Notification.Name("
             default: if text == "d" { workspace.addressFocused = true; return nil }; return event
             }
         }
-        if control && !command && !option {
-            if [123, 124, 125, 126, 115, 119].contains(event.keyCode) { workspace.keyboardMove(event.keyCode, shift: shift, control: true); return nil }
-            if event.keyCode == 49 { workspace.toggleFocusedSelection(); return nil }
+        if control && !command {
+            if [123, 124, 125, 126, 115, 119].contains(event.keyCode) {
+                guard workspace.fileSurfaceFocused else { return event }; workspace.keyboardMove(event.keyCode, shift: shift, control: true); return nil
+            }
+            if event.keyCode == 49 { guard workspace.fileSurfaceFocused else { return event }; workspace.toggleFocusedSelection(); return nil }
             if event.keyCode == 118 { workspace.closeTab(workspace.activeID); return nil }
             switch text {
             case "c": if shift { NativeIntegration.copyPaths(workspace.selectedURLs) } else { workspace.copy() }
@@ -70,10 +69,9 @@ extension Notification.Name { static let explorerNewWindow = Notification.Name("
             case "+", "=": workspace.zoomFileView(1)
             case "-": workspace.zoomFileView(-1)
             default: return event
-            }
-            return nil
+            }; return nil
         }
-        guard !command, !control, !option else { return event }
+        guard !command, !option else { return event }
         switch event.keyCode {
         case 122: workspace.sheet = .keyboardHelp; return nil
         case 120: if !workspace.selected.isEmpty { workspace.sheet = .rename }; return nil
