@@ -14,6 +14,7 @@ struct ExplorerWindow: View {
         WorkspaceShell(workspace: workspace, tab: workspace.current)
             .environmentObject(workspace)
             .focusedSceneValue(\.explorerWorkspace, workspace)
+            .focusedSceneObject(workspace)
             .background(WindowAccessor(owner: workspace).frame(width: 0, height: 0))
             .frame(minWidth: 800, minHeight: 500)
             .onAppear { AppRouter.shared.active = workspace; workspace.current.refresh() }
