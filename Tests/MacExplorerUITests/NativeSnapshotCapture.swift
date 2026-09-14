@@ -26,12 +26,13 @@ import QuartzCore
         XCTAssertEqual(host.bounds.height, size.height, accuracy: 1, "Vertical overflow: \(name)")
         let raw = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds), "No bitmap: \(name)")
         host.cacheDisplay(in: host.bounds, to: raw)
-        // AppKit tab-view/material child layers can retain alpha even over an
-        // opaque SwiftUI background. Composite onto the actual window backing,
-        // as WindowServer would, before evaluating pixel content and contrast.
+        // DeviceRGB is untagged and NSBitmapImageRep can reinterpret it using a
+        // generic monitor profile, shifting dark grays by 10-16 code values.
+        // Composite once into explicit sRGB and preserve the profile in the PNG.
+        let colorSpace = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
         let context = try XCTUnwrap(CGContext(data: nil, width: raw.pixelsWide, height: raw.pixelsHigh,
-            bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+            bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
         let rectangle = CGRect(x: 0, y: 0, width: raw.pixelsWide, height: raw.pixelsHigh)
         window.appearance?.performAsCurrentDrawingAppearance {
             context.setFillColor(window.backgroundColor.cgColor); context.fill(rectangle)
@@ -58,7 +59,6 @@ import QuartzCore
             luminanceRange: high - low, distinctSamples: shades.count, minimumAlpha: minimumAlpha)
     }
 }
-
 @MainActor private final class SnapshotWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
