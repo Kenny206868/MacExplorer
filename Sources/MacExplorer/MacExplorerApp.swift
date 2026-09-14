@@ -53,7 +53,7 @@ extension FocusedValues {
 }
 
 struct ExplorerCommands: Commands {
-    @FocusedObject(\.explorerWorkspace) private var workspace
+    @FocusedObject private var workspace: ExplorerWorkspace?
     @ObservedObject var updater: AppUpdater
     @ObservedObject private var operations = OperationCenter.shared
     @ObservedObject private var preferences = PreferenceStore.shared
@@ -91,7 +91,8 @@ struct ExplorerCommands: Commands {
             Button("Delete Permanently…") { workspace?.delete(permanent: true) }.keyboardShortcut(.delete, modifiers: [.command, .shift])
             Divider()
             Button("Quick Look") { workspace?.quickLook() }.keyboardShortcut("y")
-            Button("Properties…") { workspace?.sheet = .properties }.keyboardShortcut("i")
+            Button("Properties…") { workspace?.sheet = .properties }
+                .keyboardShortcut("i")
             Button("Tags…") { workspace?.sheet = .tags }
             Button("Compress to ZIP") { workspace?.compress() }
             Button("Extract Archive") { workspace?.extract() }
