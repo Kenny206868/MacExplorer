@@ -51,13 +51,16 @@ final class DesignReferenceTests: XCTestCase {
                 captures.append(try await NativeSnapshotCapture.render(content, named: captureName, size: NSSize(width: 1260, height: 800), dark: dark, output: output))
                 let geometry = probe.regions
                 XCTAssertEqual(try XCTUnwrap(geometry["sidebar"]).width, 211, accuracy: 0.5, captureName)
-                XCTAssertEqual(try XCTUnwrap(geometry["inspector"]).width, 254, accuracy: 0.5, captureName)
+                let inspector = try XCTUnwrap(geometry["inspector"])
+                XCTAssertEqual(inspector.width, 254, accuracy: 0.5, captureName)
                 XCTAssertEqual(try XCTUnwrap(geometry["files"]).width, 793, accuracy: 0.5, captureName)
                 for (region, height) in [("tabs", 48.0), ("commands", 54), ("address", 54), ("status", 30)] { XCTAssertEqual(try XCTUnwrap(geometry[region]).height, height, accuracy: 0.5, captureName + " " + region) }
                 let bitmap = try XCTUnwrap(NSBitmapImageRep(data: Data(contentsOf: output.appendingPathComponent(captureName + ".png"))))
                 try assertColor(bitmap, point: CGPoint(x: 880, y: 22), rgb: dark ? 0x292B33 : 0xF7F7F9, label: captureName + " title chrome")
                 try assertColor(bitmap, point: CGPoint(x: 6, y: 510), rgb: dark ? 0x25272F : 0xF3F4F7, label: captureName + " sidebar")
-                try assertColor(bitmap, point: CGPoint(x: 1249, y: 735), rgb: dark ? 0x202228 : 0xFFFFFF, label: captureName + " inspector canvas")
+                // Scrollbar visibility follows the OS/input device. The left
+                // inner margin is canvas on both overlay and legacy scrollers.
+                try assertColor(bitmap, point: CGPoint(x: inspector.minX + 4, y: 735), rgb: dark ? 0x202228 : 0xFFFFFF, label: captureName + " inspector canvas")
                 if name == "details" {
                     let frame = try XCTUnwrap(geometry["files"]), index = try XCTUnwrap(tab.displayEntries.firstIndex { $0.url == entries[3].url })
                     try assertColor(bitmap, point: CGPoint(x: frame.maxX - 5, y: frame.minY + 34 + CGFloat(index) * 36 + 18), rgb: dark ? 0x153E6D : 0xE4F0FF, label: captureName + " selected row")
