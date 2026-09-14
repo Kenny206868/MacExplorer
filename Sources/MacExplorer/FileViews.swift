@@ -163,6 +163,17 @@ struct FileTile: View {
     private var selected: Bool { tab.selection.contains(entry.url) }
     private var horizontal: Bool { [.tiles, .small, .details].contains(tab.options.view) }
     var body: some View {
+        tileContent
+            .contextMenu { FileContextMenu(workspace: workspace, urls: selected ? workspace.selectedURLs : [entry.url]) }
+            .onDrag { dragProvider() }
+            .onDrop(of: ["public.file-url"], isTargeted: nil, perform: dropProviders)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(entry.name + ", " + entry.kind)
+            .accessibilityAddTraits(selected ? [.isSelected, .isButton] : .isButton)
+            .accessibilityAction { workspace.open(entry) }
+            .help(entry.url.path)
+    }
+    private var tileContent: some View {
         Group {
             if horizontal {
                 HStack(spacing: 12) { FileThumbnail(entry: entry, size: tab.options.view == .small ? 20 : 44); labels(alignment: .leading); Spacer(minLength: 0) }.padding(10).frame(height: tab.options.view == .small ? 36 : 80)
@@ -178,12 +189,13 @@ struct FileTile: View {
             workspace.select(entry.url, extend: NSEvent.modifierFlags.intersection([.command, .control]).isEmpty == false, range: NSEvent.modifierFlags.contains(.shift))
             if preferences.value.singleClickOpen { workspace.open(entry) }
         }
-        .contextMenu { FileContextMenu(workspace: workspace, urls: selected ? workspace.selectedURLs : [entry.url]) }
-        .onDrag { if !selected { tab.selection = [entry.url] }; return NSItemProvider(object: entry.url as NSURL) }
-        .onDrop(of: ["public.file-url"], isTargeted: nil) { entry.canBrowse && workspace.drop($0, to: entry.url, move: NSEvent.modifierFlags.contains(.shift)) }
-        .accessibilityElement(children: .combine).accessibilityLabel(entry.name + ", " + entry.kind).accessibilityAddTraits(selected ? [.isSelected, .isButton] : .isButton)
-        .accessibilityAction { workspace.open(entry) }
-        .help(entry.url.path)
+    }
+    private func dragProvider() -> NSItemProvider {
+        if !selected { tab.selection = [entry.url] }
+        return NSItemProvider(object: entry.url as NSURL)
+    }
+    private func dropProviders(_ providers: [NSItemProvider]) -> Bool {
+        entry.canBrowse && workspace.drop(providers, to: entry.url, move: NSEvent.modifierFlags.contains(.shift))
     }
     private func labels(alignment: HorizontalAlignment) -> some View {
         VStack(alignment: alignment, spacing: 4) {
