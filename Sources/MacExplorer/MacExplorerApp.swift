@@ -71,16 +71,16 @@ struct ExplorerCommands: Commands {
             Button("Close Tab") { if let workspace { workspace.closeTab(workspace.activeID) } }.keyboardShortcut("w")
         }
         CommandGroup(replacing: .undoRedo) {
-            Button("Undo" + (operations.undoStack.last.map { " " + $0.title } ?? "")) { operations.undo() }.keyboardShortcut("z").disabled(operations.undoStack.isEmpty || operations.runningCount > 0 || operations.historyBusy)
-            Button("Redo" + (operations.redoStack.last.map { " " + $0.title } ?? "")) { operations.undo(redo: true) }.keyboardShortcut("z", modifiers: [.command, .shift]).disabled(operations.redoStack.isEmpty || operations.runningCount > 0 || operations.historyBusy)
+            Button(TextEditingCommands.isEditing ? "Undo" : "Undo" + (operations.undoStack.last.map { " " + $0.title } ?? "")) { if !TextEditingCommands.undo() { operations.undo() } }.keyboardShortcut("z").disabled(TextEditingCommands.isEditing ? TextEditingCommands.editor?.undoManager?.canUndo != true : operations.undoStack.isEmpty || operations.runningCount > 0 || operations.historyBusy)
+            Button(TextEditingCommands.isEditing ? "Redo" : "Redo" + (operations.redoStack.last.map { " " + $0.title } ?? "")) { if !TextEditingCommands.undo(redo: true) { operations.undo(redo: true) } }.keyboardShortcut("z", modifiers: [.command, .shift]).disabled(TextEditingCommands.isEditing ? TextEditingCommands.editor?.undoManager?.canRedo != true : operations.redoStack.isEmpty || operations.runningCount > 0 || operations.historyBusy)
         }
         CommandGroup(replacing: .pasteboard) {
-            Button("Cut") { workspace?.copy(cut: true) }.keyboardShortcut("x").disabled(workspace?.selected.isEmpty != false)
-            Button("Copy") { workspace?.copy() }.keyboardShortcut("c").disabled(workspace?.selected.isEmpty != false)
-            Button("Paste") { workspace?.paste() }.keyboardShortcut("v").disabled(workspace?.destination == nil)
+            Button("Cut") { if !TextEditingCommands.send("cut:") { workspace?.copy(cut: true) } }.keyboardShortcut("x").disabled(!TextEditingCommands.isEditing && workspace?.selected.isEmpty != false)
+            Button("Copy") { if !TextEditingCommands.send("copy:") { workspace?.copy() } }.keyboardShortcut("c").disabled(!TextEditingCommands.isEditing && workspace?.selected.isEmpty != false)
+            Button("Paste") { if !TextEditingCommands.send("paste:") { workspace?.paste() } }.keyboardShortcut("v").disabled(!TextEditingCommands.isEditing && workspace?.destination == nil)
             Button("Copy as Path") { if let workspace { NativeIntegration.copyPaths(workspace.selectedURLs) } }.keyboardShortcut("c", modifiers: [.command, .shift])
             Divider()
-            Button("Select All") { workspace?.selectAll() }.keyboardShortcut("a")
+            Button("Select All") { if !TextEditingCommands.send("selectAll:") { workspace?.selectAll() } }.keyboardShortcut("a")
             Button("Invert Selection") { workspace?.invertSelection() }
             Button("Clear Selection") { workspace?.current.selection = [] }
         }
