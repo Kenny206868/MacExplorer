@@ -1,7 +1,7 @@
 import Foundation
 
 /// Thread-safe cooperative control. Pausing and cancellation are observed between entries
-/// (and at FileManager delegate boundaries), never by interrupting an atomic rename.
+/// and native copy callbacks, never by interrupting an atomic rename.
 public final class OperationControl: @unchecked Sendable {
     private let condition = NSCondition()
     private var cancelled = false
@@ -29,13 +29,6 @@ public struct FileJob: Sendable, Identifiable {
     }
     public var title: String { kind.rawValue.capitalized }
 }
-public struct FileProgress: Sendable {
-    public let completed: Int
-    public let total: Int
-    public let name: String
-    public let bytes: Int64
-    public init(completed: Int, total: Int, name: String, bytes: Int64 = 0) { self.completed = completed; self.total = total; self.name = name; self.bytes = bytes }
-}
 public struct FileCollision: Sendable { public let source: URL; public let destination: URL }
 public enum CollisionChoice: String, CaseIterable, Sendable { case keepBoth = "Keep Both", replace = "Replace", skip = "Skip", cancel = "Cancel" }
 public struct CollisionAnswer: Sendable {
@@ -45,17 +38,19 @@ public struct CollisionAnswer: Sendable {
 }
 public struct FileFingerprint: Codable, Sendable {
     public let inode: UInt64
+    public let device: UInt64?
     public let size: UInt64
     public let modified: Date
     public init(_ url: URL) throws {
         let a = try FileManager.default.attributesOfItem(atPath: url.path)
         inode = (a[.systemFileNumber] as? NSNumber)?.uint64Value ?? 0
+        device = (a[.systemNumber] as? NSNumber)?.uint64Value
         size = (a[.size] as? NSNumber)?.uint64Value ?? 0
         modified = a[.modificationDate] as? Date ?? .distantPast
     }
     public func matches(_ url: URL) -> Bool {
         guard let now = try? FileFingerprint(url) else { return false }
-        return inode == now.inode && size == now.size && modified == now.modified
+        return inode == now.inode && (device == nil || device == now.device) && size == now.size && modified == now.modified
     }
 }
 public struct UndoStep: Codable, Sendable {
@@ -82,6 +77,8 @@ public struct FileJobResult: Sendable {
     public var errors: [String] = []
     public var outputs: [URL] = []
     public var completedSources: [URL] = []
+    public var skippedSources: [URL] = []
+    public var finalProgress: FileProgress?
     public var remaining: [UndoStep] = []
     public var cancelled = false
     public init(title: String) { receipt = OperationReceipt(title: title) }
@@ -140,50 +137,101 @@ public actor FileOperationEngine {
         guard let outcome else { throw ExplorerError.message("The filesystem did not grant coordinated access.") }
         return try outcome.get()
     }
-    private func transfer(_ job: FileJob, source: URL, target: URL, replace: Bool, control: OperationControl) throws -> [UndoStep] {
+    private func transfer(_ job: FileJob, source: URL, target: URL, replace: Bool, control: OperationControl,
+                          reporter: TransferProgressReporter) throws -> [UndoStep] {
         let manager = FileManager(), delegate = CopyDelegate(control); manager.delegate = delegate
         try guardSource(source)
         let entry = try FileEntry(url: source)
         if entry.isDirectory && !entry.isSymbolicLink && FileNames.isDescendant(target, of: source) { throw ExplorerError.message("A folder cannot be placed inside itself.") }
         guard source.standardizedFileURL != target.standardizedFileURL else { return [] }
+        let original = try FileFingerprint(source)
+        let existing = FileNames.exists(target) ? try FileFingerprint(target) : nil
+        if let existing, existing.inode == original.inode, existing.device == original.device {
+            throw ExplorerError.message("The source and destination identify the same filesystem object. Choose Keep Both.")
+        }
         let parent = target.deletingLastPathComponent()
-        let stage = parent.appendingPathComponent(".MacExplorer-stage-" + UUID().uuidString)
+        let stagingDirectory = parent.appendingPathComponent(".MacExplorer-stage-" + UUID().uuidString)
+        let stage = stagingDirectory.appendingPathComponent("payload")
         let backup = parent.appendingPathComponent(".MacExplorer-replaced-" + UUID().uuidString)
         return try coordinated(source, target) {
-            var displaced = false, staged = false
+            try control.checkpoint()
+            // The partial object lives in an exclusively created private container.
+            try manager.createDirectory(at: stagingDirectory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+            defer {
+                // Never recursively purge an unrecovered source after rollback fails.
+                if let children = try? manager.contentsOfDirectory(atPath: stagingDirectory.path), children.isEmpty {
+                    try? manager.removeItem(at: stagingDirectory)
+                }
+            }
+            var displaced = false, installed = false
             do {
-                try control.checkpoint()
                 switch job.kind {
-                case .copy: try manager.copyItem(at: source, to: stage)
+                case .copy:
+                    try NativeFileCopy.copy(from: source, to: stage, control: control) { reporter.copy($0) }
+                    guard original.matches(source) else { throw ExplorerError.message("The source changed during copying. The partial copy was not installed.") }
                 case .symbolicLink: try manager.createSymbolicLink(at: stage, withDestinationURL: source)
                 default: try manager.moveItem(at: source, to: stage)
                 }
-                staged = true
-                // A cancelled FileManager delegate may leave an incomplete copy. It must never be installed.
                 try control.checkpoint()
                 if FileNames.exists(target) {
-                    guard replace else { throw ExplorerError.message("The destination changed while copying. No existing file was overwritten.") }
+                    guard replace, let existing, existing.matches(target) else {
+                        throw ExplorerError.message("The destination changed while copying. No existing file was overwritten.")
+                    }
                     try manager.moveItem(at: target, to: backup); displaced = true
                 }
-                try manager.moveItem(at: stage, to: target); staged = false
-                var undo: [UndoStep] = []
-                if job.kind == .move { undo.append(try UndoStep(.move, source: target, destination: source)) }
-                else { undo.append(try UndoStep(.trash, source: target)) }
+                // Commit is deliberately not interruptible between these renames.
+                try manager.moveItem(at: stage, to: target); installed = true
+                var undo = [try UndoStep(job.kind == .move ? .move : .trash, source: target, destination: job.kind == .move ? source : nil)]
                 if displaced { undo.append(try UndoStep(.move, source: backup, destination: target)) }
                 return undo
             } catch {
-                // Best-effort rollback never destroys either the source or a replacement backup.
-                if staged && job.kind == .move && !FileNames.exists(source) { try? manager.moveItem(at: stage, to: source) }
-                else if FileNames.exists(stage) && job.kind != .move { try? manager.removeItem(at: stage) }
-                if displaced && !FileNames.exists(target) { try? manager.moveItem(at: backup, to: target) }
-                throw error
+                let originalError = error
+                var recoveryErrors: [String] = []
+                if installed {
+                    do { try manager.moveItem(at: target, to: stage) }
+                    catch { recoveryErrors.append("Installed object remains at \(target.path): \(error.localizedDescription)") }
+                }
+                if FileNames.exists(stage) {
+                    if job.kind == .move {
+                        if !FileNames.exists(source) {
+                            do { try manager.moveItem(at: stage, to: source) }
+                            catch { recoveryErrors.append("Original remains recoverable at \(stage.path): \(error.localizedDescription)") }
+                        } else { recoveryErrors.append("A source-path conflict prevents recovery; retained object: \(stage.path)") }
+                    } else {
+                        do { try manager.removeItem(at: stage) }
+                        catch { recoveryErrors.append("Partial copy retained at \(stage.path): \(error.localizedDescription)") }
+                    }
+                }
+                if displaced {
+                    if !FileNames.exists(target) {
+                        do { try manager.moveItem(at: backup, to: target) }
+                        catch { recoveryErrors.append("Replacement backup remains at \(backup.path): \(error.localizedDescription)") }
+                    } else { recoveryErrors.append("Replacement backup retained at \(backup.path)") }
+                }
+                if recoveryErrors.isEmpty { throw originalError }
+                throw ExplorerError.message(([originalError.localizedDescription] + recoveryErrors).joined(separator: "\n"))
             }
         }
     }
-    public func run(_ job: FileJob, control: OperationControl, progress: @Sendable (FileProgress) -> Void, resolve: @Sendable (FileCollision) async -> CollisionAnswer) async -> FileJobResult {
+    public func run(_ job: FileJob, control: OperationControl, progress: @escaping @Sendable (FileProgress) -> Void, resolve: @Sendable (FileCollision) async -> CollisionAnswer) async -> FileJobResult {
         await acquire(); defer { release() }
         var result = FileJobResult(title: job.title), sticky: CollisionChoice?
         let manager = FileManager.default
+        let reporter = TransferProgressReporter(total: job.sources.count, observer: progress)
+        if job.kind == .copy {
+            var total: Int64 = 0, completeEstimate = true
+            for source in job.sources {
+                reporter.phase(.calculating, name: source.lastPathComponent)
+                do {
+                    let size = try TransferInventory.logicalBytes(source, control: control)
+                    let (sum, overflow) = total.addingReportingOverflow(size)
+                    if overflow { completeEstimate = false } else { total = sum }
+                } catch is CancellationError {
+                    result.cancelled = true; result.finalProgress = reporter.finish(cancelled: true); return result
+                } catch { completeEstimate = false }
+            }
+            reporter.estimate(completeEstimate ? total : nil)
+        }
         if [.createFolder, .createFile, .compress, .extract].contains(job.kind) {
             do {
                 try control.checkpoint()
@@ -205,11 +253,15 @@ public actor FileOperationEngine {
                 try record(result.receipt)
             } catch is CancellationError { result.cancelled = true }
             catch { result.errors.append(error.localizedDescription) }
-            progress(FileProgress(completed: 1, total: 1, name: result.outputs.first?.lastPathComponent ?? job.title))
+            let final = FileProgress(completed: result.outputs.isEmpty ? 0 : 1, total: 1, name: result.outputs.first?.lastPathComponent ?? job.title,
+                                     phase: result.cancelled ? .cancelled : .finished)
+            result.finalProgress = final; progress(final)
             return result
         }
-        for (index, source) in job.sources.enumerated() {
-            progress(FileProgress(completed: index, total: job.sources.count, name: source.lastPathComponent))
+        for source in job.sources {
+            reporter.begin(name: source.lastPathComponent, copying: job.kind == .copy)
+            var succeeded = false
+            defer { reporter.end(success: succeeded) }
             do {
                 try control.checkpoint()
                 try guardSource(source)
@@ -226,16 +278,20 @@ public actor FileOperationEngine {
                     let name = job.names[source.path] ?? source.lastPathComponent
                     try FileNames.validate(name)
                     var target = directory.appendingPathComponent(name)
-                    if source.standardizedFileURL == target.standardizedFileURL && job.kind == .move { continue }
+                    if source.standardizedFileURL == target.standardizedFileURL && job.kind == .move { result.skippedSources.append(source); continue }
                     var replace = false
                     if FileNames.exists(target) {
                         let answer: CollisionAnswer
                         if let sticky { answer = CollisionAnswer(sticky) }
-                        else { answer = await resolve(FileCollision(source: source, destination: target)) }
+                        else {
+                            reporter.phase(.waiting, name: target.lastPathComponent)
+                            answer = await resolve(FileCollision(source: source, destination: target))
+                            reporter.phase(job.kind == .copy ? .copying : .processing, name: source.lastPathComponent)
+                        }
                         if answer.applyToAll { sticky = answer.choice }
                         switch answer.choice {
                         case .cancel: control.cancel(); throw CancellationError()
-                        case .skip: continue
+                        case .skip: result.skippedSources.append(source); continue
                         case .keepBoth: target = FileNames.unique(target)
                         case .replace:
                             // Replacing a file with itself is never a valid operation.
@@ -243,16 +299,17 @@ public actor FileOperationEngine {
                             replace = true
                         }
                     }
-                    steps = try transfer(job, source: source, target: target, replace: replace, control: control)
+                    steps = try transfer(job, source: source, target: target, replace: replace, control: control, reporter: reporter)
                     result.outputs.append(target)
                 }
-                result.completedSources.append(source)
+                result.completedSources.append(source); succeeded = true
                 result.receipt.steps.insert(contentsOf: steps, at: 0)
                 try record(result.receipt)
             } catch is CancellationError { result.cancelled = true; break }
             catch { result.errors.append("\(source.lastPathComponent): \(error.localizedDescription)") }
         }
-        progress(FileProgress(completed: job.sources.count, total: job.sources.count, name: result.cancelled ? "Cancelled" : "Finished"))
+        result.cancelled = result.cancelled || control.isCancelled
+        result.finalProgress = reporter.finish(cancelled: result.cancelled)
         return result
     }
     public func undo(_ receipt: OperationReceipt, control: OperationControl) async -> FileJobResult {
@@ -320,7 +377,7 @@ public actor FileOperationEngine {
                 guard targets.insert(target).inserted else { throw ExplorerError.message("Two items would have the same name.") }
                 if FileNames.exists(target) && !sources.contains(target) {
                     let a = try? FileFingerprint(source), b = try? FileFingerprint(target)
-                    guard a?.inode == b?.inode else { throw ExplorerError.message("The name \(name) already exists.") }
+                    guard a?.inode == b?.inode && a?.device == b?.device else { throw ExplorerError.message("The name \(name) already exists.") }
                 }
             }
             for (source, name) in mapping {

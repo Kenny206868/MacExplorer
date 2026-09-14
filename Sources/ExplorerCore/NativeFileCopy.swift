@@ -43,6 +43,7 @@ public enum NativeFileCopy {
             }
         }
         let code = errno
+        if context.failure != nil || status != 0 { context.emit(force: true) }
         if let failure = context.failure { throw failure }
         guard status == 0 else {
             if control.isCancelled || code == ECANCELED { throw CancellationError() }
@@ -70,6 +71,7 @@ public enum NativeFileCopy {
     private static let copyCallback: copyfile_callback_t = { what, stage, state, source, _, opaque in
         guard let opaque else { return Int32(COPYFILE_QUIT) }
         let context = Unmanaged<CopyContext>.fromOpaque(opaque).takeUnretainedValue()
+        if context.failure != nil { return Int32(COPYFILE_QUIT) }
         if stage == COPYFILE_ERR {
             let code = errno
             context.failure = NSError(domain: NSPOSIXErrorDomain, code: Int(code == 0 ? EIO : code),
