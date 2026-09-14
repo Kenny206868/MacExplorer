@@ -29,8 +29,16 @@ public struct FileJob: Sendable, Identifiable {
     }
     public var title: String { kind.rawValue.capitalized }
 }
-public struct FileCollision: Sendable { public let source: URL; public let destination: URL }
-public enum CollisionChoice: String, CaseIterable, Sendable { case keepBoth = "Keep Both", replace = "Replace", skip = "Skip", cancel = "Cancel" }
+public struct FileCollision: Sendable {
+    public let source: URL
+    public let destination: URL
+    public let canMerge: Bool
+    public init(source: URL, destination: URL) {
+        self.source = source; self.destination = destination
+        canMerge = DirectoryMergeGuard.canMerge(source, destination)
+    }
+}
+public enum CollisionChoice: String, CaseIterable, Sendable { case keepBoth = "Keep Both", merge = "Merge", replace = "Replace", skip = "Skip", cancel = "Cancel" }
 public struct CollisionAnswer: Sendable {
     public let choice: CollisionChoice
     public let applyToAll: Bool
@@ -48,6 +56,10 @@ public struct FileFingerprint: Codable, Sendable {
         size = (a[.size] as? NSNumber)?.uint64Value ?? 0
         modified = a[.modificationDate] as? Date ?? .distantPast
     }
+    public func matchesIdentity(_ url: URL) -> Bool {
+        guard let now = try? FileFingerprint(url) else { return false }
+        return inode != 0 && inode == now.inode && (device == nil || device == now.device)
+    }
     public func matches(_ url: URL) -> Bool {
         guard let now = try? FileFingerprint(url) else { return false }
         return inode == now.inode && (device == nil || device == now.device) && size == now.size && modified == now.modified
@@ -59,8 +71,20 @@ public struct UndoStep: Codable, Sendable {
     public let source: URL
     public let destination: URL?
     public let expected: FileFingerprint
-    public init(_ kind: Kind, source: URL, destination: URL? = nil) throws {
-        self.kind = kind; self.source = source; self.destination = destination; expected = try FileFingerprint(source)
+    /// Empty source containers in a move-merge are retained, not deleted. Their
+    /// mtimes change as our inverse child operations run; identity + emptiness
+    /// protect them during both Undo and Redo. Optional for older receipts.
+    public let emptyDirectory: Bool?
+    public init(_ kind: Kind, source: URL, destination: URL? = nil, emptyDirectory: Bool = false) throws {
+        self.kind = kind; self.source = source; self.destination = destination
+        self.emptyDirectory = emptyDirectory ? true : nil; expected = try FileFingerprint(source)
+    }
+    public func canRestore() -> Bool {
+        if emptyDirectory == true {
+            return expected.matchesIdentity(source) && DirectoryMergeGuard.isPlainDirectory(source)
+                && (try? FileManager.default.contentsOfDirectory(atPath: source.path).isEmpty) == true
+        }
+        return expected.matches(source)
     }
 }
 public struct OperationReceipt: Identifiable, Codable, Sendable {
@@ -97,7 +121,8 @@ public actor FileOperationEngine {
     public static let shared = FileOperationEngine()
     private var occupied = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
-    public init() {}
+    private let recoveryDirectory: URL
+    public init(recoveryDirectory: URL? = nil) { self.recoveryDirectory = recoveryDirectory ?? Self.journalDirectory }
     private func acquire() async {
         if occupied { await withCheckedContinuation { waiters.append($0) } }
         else { occupied = true }
@@ -108,18 +133,18 @@ public actor FileOperationEngine {
     public static var journalDirectory: URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/MacExplorer/Recovery", isDirectory: true)
     }
-    private func record(_ receipt: OperationReceipt) throws {
+    func record(_ receipt: OperationReceipt) throws {
         guard !receipt.steps.isEmpty else { return }
-        let directory = Self.journalDirectory
+        let directory = recoveryDirectory
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(receipt).write(to: directory.appendingPathComponent(receipt.id.uuidString + ".json"), options: .atomic)
     }
     public func history() -> [OperationReceipt] {
-        let urls = (try? FileManager.default.contentsOfDirectory(at: Self.journalDirectory, includingPropertiesForKeys: nil)) ?? []
+        let urls = (try? FileManager.default.contentsOfDirectory(at: recoveryDirectory, includingPropertiesForKeys: nil)) ?? []
         return urls.compactMap { url in (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode(OperationReceipt.self, from: $0) } }.sorted { $0.date > $1.date }
     }
-    private func guardSource(_ url: URL) throws {
+    func guardSource(_ url: URL) throws {
         let standardized = url.standardizedFileURL
         let protected = ["/", "/System", "/Library", "/Users", "/Volumes", FileManager.default.homeDirectoryForCurrentUser.path]
         guard !protected.contains(standardized.path), standardized.lastPathComponent != ".", standardized.lastPathComponent != ".." else { throw ExplorerError.message("This filesystem root cannot be modified: \(url.path)") }
@@ -137,7 +162,7 @@ public actor FileOperationEngine {
         guard let outcome else { throw ExplorerError.message("The filesystem did not grant coordinated access.") }
         return try outcome.get()
     }
-    private func transfer(_ job: FileJob, source: URL, target: URL, replace: Bool, control: OperationControl,
+    func transfer(_ job: FileJob, source: URL, target: URL, replace: Bool, control: OperationControl,
                           reporter: TransferProgressReporter) throws -> [UndoStep] {
         let manager = FileManager(), delegate = CopyDelegate(control); manager.delegate = delegate
         try guardSource(source)
@@ -279,13 +304,14 @@ public actor FileOperationEngine {
                     try FileNames.validate(name)
                     var target = directory.appendingPathComponent(name)
                     if source.standardizedFileURL == target.standardizedFileURL && job.kind == .move { result.skippedSources.append(source); continue }
-                    var replace = false
+                    var replace = false, merge = false
                     if FileNames.exists(target) {
+                        let collision = FileCollision(source: source, destination: target)
                         let answer: CollisionAnswer
-                        if let sticky { answer = CollisionAnswer(sticky) }
+                        if let sticky, sticky != .merge || collision.canMerge { answer = CollisionAnswer(sticky) }
                         else {
                             reporter.phase(.waiting, name: target.lastPathComponent)
-                            answer = await resolve(FileCollision(source: source, destination: target))
+                            answer = await resolve(collision)
                             reporter.phase(job.kind == .copy ? .copying : .processing, name: source.lastPathComponent)
                         }
                         if answer.applyToAll { sticky = answer.choice }
@@ -293,11 +319,25 @@ public actor FileOperationEngine {
                         case .cancel: control.cancel(); throw CancellationError()
                         case .skip: result.skippedSources.append(source); continue
                         case .keepBoth: target = FileNames.unique(target)
+                        case .merge:
+                            guard collision.canMerge, job.kind == .copy || job.kind == .move else {
+                                throw ExplorerError.message("Only distinct ordinary folders can be merged. Packages and symbolic links are not traversed.")
+                            }
+                            merge = true
                         case .replace:
-                            // Replacing a file with itself is never a valid operation.
                             guard source.standardizedFileURL != target.standardizedFileURL else { throw ExplorerError.message("Choose Keep Both to duplicate an item in the same folder.") }
                             replace = true
                         }
+                    }
+                    if merge {
+                        let merged = await mergeContents(job, source: source, target: target, receipt: result.receipt,
+                                                         control: control, reporter: reporter, resolve: resolve)
+                        result.receipt = merged.receipt
+                        result.errors += merged.errors; result.outputs += merged.outputs
+                        result.completedSources += merged.completedSources; result.skippedSources += merged.skippedSources
+                        succeeded = !merged.completedSources.isEmpty
+                        if merged.cancelled { result.cancelled = true; break }
+                        continue
                     }
                     steps = try transfer(job, source: source, target: target, replace: replace, control: control, reporter: reporter)
                     result.outputs.append(target)
@@ -339,12 +379,12 @@ public actor FileOperationEngine {
         for (index, step) in receipt.steps.enumerated() {
             do {
                 try control.checkpoint()
-                guard step.expected.matches(step.source) else { throw ExplorerError.message("\(step.source.lastPathComponent) changed since the operation. Undo stopped to protect newer changes.") }
+                guard step.canRestore() else { throw ExplorerError.message("\(step.source.lastPathComponent) changed since the operation. Undo stopped to protect newer changes.") }
                 switch step.kind {
                 case .move:
                     guard let destination = step.destination, !FileNames.exists(destination) else { throw ExplorerError.message("Undo destination is occupied. Move the conflicting item first.") }
                     try FileManager.default.moveItem(at: step.source, to: destination)
-                    result.receipt.steps.insert(try UndoStep(.move, source: destination, destination: step.source), at: 0)
+                    result.receipt.steps.insert(try UndoStep(.move, source: destination, destination: step.source, emptyDirectory: step.emptyDirectory == true), at: 0)
                     result.outputs.append(destination)
                 case .trash:
                     var trashed: NSURL?

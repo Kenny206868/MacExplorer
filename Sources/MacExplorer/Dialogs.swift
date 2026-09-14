@@ -160,21 +160,3 @@ struct ConnectSheet: View {
     }
     private func connect() { dismiss(); NativeIntegration.connect(address, owner: workspace) }
 }
-
-struct CollisionView: View {
-    let prompt: ConflictPrompt
-    @ObservedObject var workspace: ExplorerWorkspace
-    @State private var all = false
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack(alignment: .top, spacing: 15) { Image(systemName: "doc.on.doc").font(.system(size: 34)).foregroundStyle(.tint); SheetHeading(title: "An item with this name already exists", subtitle: prompt.collision.destination.lastPathComponent) }
-            Grid(alignment: .topLeading, horizontalSpacing: 15, verticalSpacing: 12) {
-                GridRow { Text("From").foregroundStyle(.secondary); Text(prompt.collision.source.path).textSelection(.enabled) }
-                GridRow { Text("To").foregroundStyle(.secondary); Text(prompt.collision.destination.path).textSelection(.enabled) }
-            }.font(.caption)
-            Text("Keep Both creates a numbered copy. Replace retains the old item as a hidden recovery backup beside the destination. Replacing a folder replaces the whole folder; it does not merge its children.").font(.callout).foregroundStyle(.secondary)
-            Toggle("Apply this decision to all remaining conflicts", isOn: $all)
-            HStack { Button("Cancel Operation") { workspace.answerCollision(.cancel) }.keyboardShortcut(.cancelAction); Spacer(); Button("Skip") { workspace.answerCollision(.skip, all: all) }; Button("Replace") { workspace.answerCollision(.replace, all: all) }; Button("Keep Both") { workspace.answerCollision(.keepBoth, all: all) }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction) }
-        }.padding(26).frame(width: 590)
-    }
-}

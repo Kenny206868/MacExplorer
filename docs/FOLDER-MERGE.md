@@ -1,0 +1,11 @@
+# Recursive folder merging
+
+The collision dialog offers **Merge Folders** only for distinct, non-overlapping ordinary directories. The destination directory retains its identity and metadata. Destination-only children are untouched. Matching ordinary subdirectories merge recursively; packages and symbolic links remain indivisible items with their own collision decision. An explicit leaf replacement uses the same staged transfer and retained replacement backup as a normal transfer.
+
+The engine uses an iterative work stack and shared immutable ancestry stamps. It revalidates identities after collision prompts, refuses changed source/destination objects, and checks cancellation at safe boundaries. Merge consent does not become blanket file replacement consent. A leaf decision can be applied to the remaining leaf conflicts in that merge.
+
+Each installed child is added to the operation receipt before further work. Cancellation or failure retains completed children and their inverse operations. Skipped children retain the source root and therefore its cut state. For move-merges, empty source containers are moved outside the source tree to hidden recovery paths rather than recursively deleted. Undo restores those original containers before the children, preserving their identities and metadata; Redo uses identity plus emptiness checks because our own child operations legitimately modify folder mtimes. An externally inserted child stops container recovery rather than moving unrelated content.
+
+`DirectoryMergeTests` exercises nested copy and move merges, Undo/Redo, replacement backups, skipped conflicts, cancellation with durable partial receipts, overlapping/link roots, externally changed recovery containers, and replacement of a parent while a collision prompt is open. Test engines use an isolated recovery directory inside each disposable fixture.
+
+This is a sequence of coordinated per-child commits, not a filesystem-wide atomic transaction or a complete crash write-ahead journal. A process crash between a filesystem rename and receipt persistence still requires inspection of the retained hidden recovery objects. Directory identity validation reduces race exposure but does not claim immunity to every external mutation or replace platform filesystem permissions.

@@ -67,6 +67,10 @@ final class TransferProgressReporter: @unchecked Sendable {
             $0.phase = .copying
         }
     }
+    /// Commit a merge child without incrementing the completed top-level count.
+    func commitChild() {
+        update { $0.baseBytes = $0.bytes; $0.baseLogical = $0.logical; $0.baseClones = $0.clones }
+    }
     func end(success: Bool) {
         update {
             if success { $0.completed += 1 }
