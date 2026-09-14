@@ -160,13 +160,14 @@ enum ExplorerSheet: String, Identifiable { case newFolder, newFile, rename, prop
     @Published var searchFocused = false
     @Published var selectedInspector = "Details"
     weak var window: NSWindow?
+    var restorationFrame: CGRect?
     let preferences = PreferenceStore.shared
     let operations = OperationCenter.shared
     var current: BrowserTab { tabs.first(where: { $0.id == activeID }) ?? tabs[0] }
     var selected: [FileEntry] { current.selectedEntries }
     var selectedURLs: [URL] { selected.map(\.url) }
     var destination: URL? { current.location.directory }
-    init(session: BrowserSession? = nil) {
+    init(session: BrowserSession? = nil, windowSession: WindowSession? = nil) {
         if let session {
             let tab = BrowserTab(session.history.current)
             tabs = [tab]; activeID = tab.id
@@ -175,7 +176,19 @@ enum ExplorerSheet: String, Identifiable { case newFolder, newFile, rename, prop
             return
         }
         let p = PreferenceStore.shared
-        let locations: [Location] = p.value.restoreTabs && !p.value.tabs.isEmpty ? p.value.tabs : [p.value.startLocation == "This Mac" ? .computer : .home]
+        let initialChoice = windowSession.map(WorkspaceSessionCoordinator.InitialWindow.restored)
+            ?? WorkspaceSessionCoordinator.shared.claimInitialWindow(restore: p.value.restoreTabs)
+        if case .restored(let saved) = initialChoice {
+            let restored = saved.tabs.map { value -> BrowserTab in
+                let tab = BrowserTab(value.history.current); tab.restore(value); return tab
+            }
+            tabs = restored; activeID = restored[saved.activeIndex].id
+            closedTabs = saved.closedTabs; restorationFrame = saved.frame
+            observeCurrentTab(); return
+        }
+        let useLegacy: Bool
+        if case .legacy = initialChoice { useLegacy = true } else { useLegacy = false }
+        let locations: [Location] = useLegacy && !p.value.tabs.isEmpty ? p.value.tabs : [p.value.startLocation == "This Mac" ? .computer : .home]
         let initial = locations.prefix(20).map { BrowserTab($0) }
         tabs = initial; activeID = initial[0].id
         observeCurrentTab()
@@ -183,7 +196,7 @@ enum ExplorerSheet: String, Identifiable { case newFolder, newFile, rename, prop
     private func observeCurrentTab() {
         tabObservation = current.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
     }
-    func saveSession() { preferences.value.tabs = tabs.map(\.location) }
+    func saveSession() { WorkspaceSessionCoordinator.shared.record(self) }
     func newTab(_ location: Location? = nil) { let tab = BrowserTab(location ?? .home); tabs.append(tab); activeID = tab.id; saveSession() }
     func closeTab(_ id: UUID) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }

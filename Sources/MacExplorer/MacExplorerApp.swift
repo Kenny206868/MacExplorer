@@ -22,6 +22,16 @@ import ExplorerCore
         }
         .defaultSize(width: 1260, height: 800)
         .windowStyle(.hiddenTitleBar)
+        WindowGroup("MacExplorer", id: "restored-session", for: WindowSession.self) { session in
+            ExplorerWindow(windowSession: session.wrappedValue)
+                .environmentObject(preferences).environmentObject(updater)
+                .preferredColorScheme(preferences.colorScheme)
+        }
+        .defaultSize(width: 1260, height: 800)
+        .windowStyle(.hiddenTitleBar)
+        Window("Window History", id: "session-history") {
+            SessionHistoryView().environmentObject(preferences).preferredColorScheme(preferences.colorScheme)
+        }.defaultSize(width: 680, height: 480)
         Settings { PreferencesView().environmentObject(preferences).environmentObject(updater).preferredColorScheme(preferences.colorScheme) }
     }
 }
@@ -55,6 +65,7 @@ extension FocusedValues {
 struct ExplorerCommands: Commands {
     @FocusedObject private var workspace: ExplorerWorkspace?
     @ObservedObject var updater: AppUpdater
+    @ObservedObject private var sessions = WorkspaceSessionCoordinator.shared
     @ObservedObject private var operations = OperationCenter.shared
     @ObservedObject private var preferences = PreferenceStore.shared
     @Environment(\.openWindow) private var openWindow
@@ -91,8 +102,7 @@ struct ExplorerCommands: Commands {
             Button("Delete Permanently…") { workspace?.delete(permanent: true) }.keyboardShortcut(.delete, modifiers: [.command, .shift])
             Divider()
             Button("Quick Look") { workspace?.quickLook() }.keyboardShortcut("y")
-            Button("Properties…") { workspace?.sheet = .properties }
-                .keyboardShortcut("i")
+            Button("Properties…") { workspace?.sheet = .properties }.keyboardShortcut("i")
             Button("Tags…") { workspace?.sheet = .tags }
             Button("Compress to ZIP") { workspace?.compress() }
             Button("Extract Archive") { workspace?.extract() }
@@ -119,6 +129,9 @@ struct ExplorerCommands: Commands {
             Button("Refresh") { workspace?.current.refresh() }.keyboardShortcut("r")
         }
         CommandGroup(after: .windowArrangement) {
+            Button("Reopen Closed Window") { if let value = sessions.reopen() { openWindow(id: "restored-session", value: value) } }.disabled(sessions.closedWindows.isEmpty)
+            Button("Window History…") { openWindow(id: "session-history") }
+            Divider()
             Button("Next Tab") { workspace?.cycleTab(1) }.keyboardShortcut("]", modifiers: [.command, .shift])
             Button("Previous Tab") { workspace?.cycleTab(-1) }.keyboardShortcut("[", modifiers: [.command, .shift])
             Divider()

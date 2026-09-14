@@ -16,8 +16,7 @@ import ExplorerCore
         NSUpdateDynamicServices()
         let arguments = CommandLine.arguments.dropFirst().filter { !$0.hasPrefix("-") }
         AppRouter.shared.pending += arguments.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
-        // Local, app-window-only event routing implements Explorer's F2/F5/Delete conventions.
-        // It never installs a global event tap or records keyboard input.
+        // Local, app-window-only event routing; never a global event tap.
         keyboardMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in MainActor.assumeIsolated { KeyboardRouter.handle(event) } }
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -35,6 +34,7 @@ import ExplorerCore
             AppRouter.shared.active?.fail("File operations are still running", "Finish or cancel active operations before quitting. Completed files will not be rolled back automatically.")
             return .terminateCancel
         }
+        WorkspaceSessionCoordinator.shared.prepareToQuit()
         return .terminateNow
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }

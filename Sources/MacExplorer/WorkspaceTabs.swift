@@ -2,9 +2,8 @@ import SwiftUI
 import AppKit
 import ExplorerCore
 
-/// A value-based SwiftUI window request; identity is independent of its location.
-/// History, query, selection and view settings survive duplicate/reopen/detach.
-struct BrowserSession: Codable, Hashable {
+/// A value-based SwiftUI window request, independent of its location.
+struct BrowserSession: Codable, Hashable, Sendable {
     let id: UUID
     let history: NavigationHistory
     let options: FolderOptions
@@ -74,8 +73,7 @@ struct BrowserSession: Codable, Hashable {
     }
 }
 
-/// A drag can move only a live tab from this process. The unguessable ticket is
-/// checked after asynchronous provider loading; a cancelled/older drag is inert.
+/// Only a live tab from this process can consume the unguessable drag ticket.
 @MainActor private final class TabDragSession {
     static let shared = TabDragSession()
     static let type = "com.wieslawsoltes.macexplorer.tab"

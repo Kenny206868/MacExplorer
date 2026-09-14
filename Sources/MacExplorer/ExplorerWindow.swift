@@ -5,9 +5,10 @@ import ExplorerCore
 
 struct ExplorerWindow: View {
     @StateObject private var workspace: ExplorerWorkspace
-    init(session: BrowserSession? = nil) {
-        _workspace = StateObject(wrappedValue: ExplorerWorkspace(session: session))
+    init(session: BrowserSession? = nil, windowSession: WindowSession? = nil) {
+        _workspace = StateObject(wrappedValue: ExplorerWorkspace(session: session, windowSession: windowSession))
     }
+    @Environment(\.openWindow) private var openWindow
     @EnvironmentObject private var preferences: PreferenceStore
     @ObservedObject private var operations = OperationCenter.shared
     var body: some View {
@@ -17,7 +18,21 @@ struct ExplorerWindow: View {
             .focusedSceneObject(workspace)
             .background(WindowAccessor(owner: workspace).frame(width: 0, height: 0))
             .frame(minWidth: 800, minHeight: 500)
-            .onAppear { AppRouter.shared.active = workspace; workspace.current.refresh() }
+            .onAppear {
+                AppRouter.shared.active = workspace
+                WorkspaceSessionCoordinator.shared.register(workspace)
+                WorkspaceSessionCoordinator.shared.restoreAdditionalWindows { openWindow(id: "restored-session", value: $0) }
+                workspace.current.refresh()
+                Task { @MainActor in
+                    await Task.yield()
+                    if let frame = workspace.restorationFrame, let window = workspace.window {
+                        window.restoreExplorerFrame(frame); workspace.restorationFrame = nil
+                    }
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { notification in
+                if let window = notification.object as? NSWindow, window == workspace.window { WorkspaceSessionCoordinator.shared.close(workspace) }
+            }
             .onDisappear { workspace.answerCollision(.cancel); workspace.saveSession(); workspace.tabs.forEach { $0.stop() } }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { notification in
                 if let window = notification.object as? NSWindow, window == workspace.window { AppRouter.shared.active = workspace; FileClipboard.shared.refresh() }
