@@ -1,0 +1,11 @@
+# File surface: marquee, native drag, spring folders
+
+The SwiftUI icon/tile/gallery grid now shares a deterministic layout with ExplorerCore hit testing. Selection rectangles account for group headers, cell gaps, insets and column count. Offscreen cells need not have instantiated SwiftUI views: a 100,000-item geometry fixture exercises selection at index 90,000. Plain dragging from empty space replaces selection; Shift adds and Control/Command toggles against the original set. Dragging starts on empty space only, leaving file dragging independent. Home/End and vertical navigation use the actual grid column count; focus is visually distinct from selection.
+
+Outgoing file drags use a transparent NSViewRepresentable integration point and one process-wide local event monitor, with weak registrations for visible cells. Each selected URL becomes its own NSDraggingItem and NSURL pasteboard writer; Finder and other applications receive the whole selection rather than only the pointer anchor. SwiftUI continues to own every visible control. Completed drag reports never trigger a second source deletion: the destination owns the actual filesystem transaction. Registrations and session retention are explicitly released.
+
+Browsable folder cells highlight during an accepted file drop and spring open after 750 ms of hover. Leaving or destroying the target cancels pending navigation. This applies to icon, tile, list/content and Details Name cells. The current explicit drop contract is copy by default and Shift to move; modifier proposals match the chosen operation. Automatic same-volume move inference, spring-navigation rollback and marquee edge auto-scroll remain separate interaction refinements, not implied capabilities.
+
+Package contents are now offered for actual macOS packages, rather than only for ordinary directories. Native Table selection remains the pointer-selection owner in Details mode and synchronizes keyboard focus. The file surface was split into smaller SwiftUI compilation units to keep future changes localized.
+
+API references: https://developer.apple.com/documentation/appkit/nsview/begindraggingsession(with:event:source:) and https://developer.apple.com/documentation/swiftui/dropdelegate . Native interaction behavior requires macOS; source and geometry tests alone are not a GUI test report.
