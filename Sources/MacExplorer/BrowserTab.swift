@@ -7,6 +7,7 @@ import ExplorerCore
     @Published var history: NavigationHistory
     @Published var entries: [FileEntry] = [] { didSet { invalidatePresentation() } }
     @Published var selection: Set<URL> = []
+    @Published var collapsedGroups: Set<String> = []
     @Published var query = "" { didSet { if query != oldValue { scheduleSearch() } } }
     @Published var allLocations = false { didSet { scheduleSearch() } }
     @Published var loading = false
@@ -17,6 +18,7 @@ import ExplorerCore
     @Published var options: FolderOptions {
         didSet {
             if options.sort != oldValue.sort || options.descending != oldValue.descending || options.foldersFirst != oldValue.foldersFirst || options.group != oldValue.group { invalidatePresentation() }
+            if options.group != oldValue.group { collapsedGroups = [] }
             PreferenceStore.shared.remember(location, options)
         }
     }
@@ -25,8 +27,7 @@ import ExplorerCore
     private var presentation: FilePresentation {
         if let cachedPresentation { return cachedPresentation }
         let value = FilePresentation(entries: entries, options: options)
-        cachedPresentation = value; presentationBuilds += 1
-        return value
+        cachedPresentation = value; presentationBuilds += 1; return value
     }
     func invalidatePresentation() { cachedPresentation = nil }
     var selectedEntries: [FileEntry] { presentation.selected(selection) }
@@ -41,6 +42,20 @@ import ExplorerCore
         set { selection = newValue.selected; selectionAnchor = newValue.anchor; focusedURL = newValue.focus }
     }
     var displayEntries: [FileEntry] { presentation.ordered }
+    /// The keyboard and Details rendering consume the same expanded rows.
+    var navigableEntries: [FileEntry] {
+        guard options.view == .details, !collapsedGroups.isEmpty else { return displayEntries }
+        return presentation.groups.filter { !collapsedGroups.contains($0.title) }.flatMap(\.entries)
+    }
+    func toggleGroup(_ title: String) {
+        guard !title.isEmpty, let group = presentation.groups.first(where: { $0.title == title }) else { return }
+        if collapsedGroups.remove(title) != nil { return }
+        let hidden = Set(group.entries.map(\.url))
+        collapsedGroups.insert(title); selection.subtract(hidden)
+        if let focus = focusedURL, hidden.contains(focus) { focusedURL = nil }
+        if let anchor = selectionAnchor, hidden.contains(anchor) { selectionAnchor = nil }
+        rangeBaseline = nil; typeAhead.reset()
+    }
     func revealAfterRefresh(_ urls: [URL]) { refresh(selecting: urls) }
     let service = FileService()
     private var work: Task<Void, Never>?
@@ -54,7 +69,7 @@ import ExplorerCore
     func stop() { generation += 1; work?.cancel(); spotlight.stop(); watcher.stop() }
     func refresh(selecting urls: [URL]) { pendingSelection = Set(urls); refresh() }
     private func resetSelection() {
-        selection = []; selectionAnchor = nil; focusedURL = nil
+        selection = []; selectionAnchor = nil; focusedURL = nil; collapsedGroups = []
         rangeBaseline = nil; pendingSelection = nil; typeAhead = TypeAheadSearch()
     }
     func navigate(_ location: Location) {
@@ -111,7 +126,7 @@ import ExplorerCore
                     case .trash:
                         var combined = DirectorySnapshot()
                         for trash in NativeIntegration.trashDirectories() {
-                            do { let part = try await service.list(trash, showHidden: p.showHidden); combined.entries += part.entries; combined.warnings += part.warnings }
+                            do { let part = try await self.service.list(trash, showHidden: p.showHidden); combined.entries += part.entries; combined.warnings += part.warnings }
                             catch { combined.warnings.append("\(trash.path): \(error.localizedDescription)") }
                         }
                         snapshot = combined
@@ -126,8 +141,10 @@ import ExplorerCore
     private func install(_ snapshot: DirectorySnapshot) {
         entries = snapshot.entries; warnings = snapshot.warnings; truncated = snapshot.truncated
         let available = Set(entries.map(\.url))
-        if let pendingSelection { selection = pendingSelection.intersection(available); self.pendingSelection = nil }
-        else { selection.formIntersection(available) }
+        if let pendingSelection {
+            selection = pendingSelection.intersection(available); self.pendingSelection = nil
+            for group in presentation.groups where group.entries.contains(where: { selection.contains($0.url) }) { collapsedGroups.remove(group.title) }
+        } else { selection.formIntersection(available) }
         if let focus = focusedURL, !available.contains(focus) { focusedURL = nil }
         if let anchor = selectionAnchor, !available.contains(anchor) { selectionAnchor = nil; rangeBaseline = nil }
     }
@@ -141,12 +158,10 @@ import ExplorerCore
         if self.url == url, source != nil { return }
         stop()
         let descriptor = open(url.path, O_EVTONLY)
-        guard descriptor >= 0 else { return }
-        self.url = url
+        guard descriptor >= 0 else { return }; self.url = url
         let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: descriptor, eventMask: [.write, .delete, .rename, .attrib, .extend, .link, .revoke], queue: .main)
         source.setEventHandler { Task { @MainActor in changed() } }
-        source.setCancelHandler { close(descriptor) }
-        self.source = source; source.resume()
+        source.setCancelHandler { close(descriptor) }; self.source = source; source.resume()
     }
     func stop() { source?.cancel(); source = nil; url = nil }
     deinit { source?.cancel() }
@@ -157,12 +172,10 @@ import ExplorerCore
     private var observers: [NSObjectProtocol] = []
     private var generation = 0
     func start(expression: SearchExpression, root: URL?, receive: @escaping @MainActor ([URL], Bool) -> Void) {
-        stop()
-        let token = generation
+        stop(); let token = generation
         let query = NSMetadataQuery(); self.query = query
         query.searchScopes = root.map { [$0.path] } ?? [NSMetadataQueryLocalComputerScope]
-        query.predicate = expression.spotlightPredicate
-        query.notificationBatchingInterval = 0.3
+        query.predicate = expression.spotlightPredicate; query.notificationBatchingInterval = 0.3
         for name in [Notification.Name.NSMetadataQueryDidFinishGathering, .NSMetadataQueryDidUpdate] {
             observers.append(NotificationCenter.default.addObserver(forName: name, object: query, queue: .main) { [weak self] _ in
                 Task { @MainActor in

@@ -7,7 +7,6 @@ struct FileDetailsTable: View {
     @ObservedObject var tab: BrowserTab
     @ObservedObject private var columns = DetailsColumnStore.shared
     @EnvironmentObject private var preferences: PreferenceStore
-    @State private var collapsed = Set<String>()
     @State private var scrollbarGutter: CGFloat = 0
     @ObservedObject private var input = InputPreferences.shared
     var embedded = false
@@ -17,42 +16,40 @@ struct FileDetailsTable: View {
             let available = max(0, geometry.size.width - scrollbarGutter)
             let widths = columns.value.widths(available: available)
             let total = max(available, widths.reduce(0, +))
+            let layout = DetailsRowGeometry(counts: tab.groups.map { tab.collapsedGroups.contains($0.0) ? 0 : $0.1.count }, headings: tab.groups.map { !$0.0.isEmpty }, rowHeight: input.rowHeight(compact: preferences.value.compact), headerHeight: input.headerHeight)
             ScrollViewReader { proxy in
                 ScrollView([.horizontal, .vertical]) {
                     LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
                         Section {
                             ForEach(Array(tab.groups.enumerated()), id: \.offset) { _, group in
                                 if !group.0.isEmpty { groupHeader(group.0, count: group.1.count) }
-                                if !collapsed.contains(group.0) {
-                                    ForEach(group.1) { entry in
-                                        DetailsFileRow(entry: entry, workspace: workspace, tab: tab, columns: visible, widths: widths).id(entry.url)
-                                    }
+                                if !tab.collapsedGroups.contains(group.0) {
+                                    ForEach(group.1) { entry in DetailsFileRow(entry: entry, workspace: workspace, tab: tab, columns: visible, widths: widths).id(entry.url) }
                                 }
                             }
                         } header: {
                             HStack(spacing: 0) {
-                                ForEach(Array(visible.enumerated()), id: \.element) { index, column in
-                                    DetailsColumnHeader(column: column, width: widths[index], tab: tab, store: columns)
-                                }
+                                ForEach(Array(visible.enumerated()), id: \.element) { index, column in DetailsColumnHeader(column: column, width: widths[index], tab: tab, store: columns) }
                             }.frame(width: total, height: input.headerHeight).background(ExplorerDesign.canvas)
                                 .overlay(alignment: .bottom) { ExplorerRule() }.explorerRegion("details.header")
                         }
                     }.frame(width: total).frame(minHeight: geometry.size.height, alignment: .top)
-                        .background(ExplorerDesign.canvas).contentShape(Rectangle())
+                        .background(ExplorerDesign.canvas)
                         .background(ScrollViewportMetrics { scrollbarGutter = $0 })
+                        .modifier(DetailsMarquee(workspace: workspace, tab: tab, geometry: layout, entries: tab.navigableEntries))
                         .contextMenu { FileContextMenu(workspace: workspace, urls: []) }
                 }.onChange(of: tab.focusedURL) { _, url in if let url { proxy.scrollTo(url) } }
-                    .onChange(of: tab.options.group) { _, _ in collapsed = [] }
             }
         }.accessibilityIdentifier("explorer.detailsTable")
     }
     private func groupHeader(_ title: String, count: Int) -> some View {
-        Button { if collapsed.contains(title) { collapsed.remove(title) } else { collapsed.insert(title) } } label: {
+        Button { workspace.fileSurfaceFocused = false; tab.toggleGroup(title) } label: {
             HStack(spacing: 8) {
-                Image(systemName: collapsed.contains(title) ? "chevron.right" : "chevron.down").font(.system(size: 9, weight: .semibold))
+                Image(systemName: tab.collapsedGroups.contains(title) ? "chevron.right" : "chevron.down").font(.system(size: 9, weight: .semibold))
                 Text(title).fontWeight(.semibold); Text("\(count)").foregroundStyle(ExplorerDesign.muted); Spacer()
             }.font(.system(size: 11)).padding(.horizontal, 14).frame(height: input.headerHeight).background(ExplorerDesign.chrome)
         }.buttonStyle(.plain).accessibilityLabel(title + ", \(count) items")
+            .accessibilityValue(tab.collapsedGroups.contains(title) ? "Collapsed" : "Expanded")
     }
 }
 private struct DetailsFileRow: View {
@@ -108,8 +105,8 @@ private struct DetailsFileRow: View {
                 Text(entry.modified.formatted(date: .abbreviated, time: .omitted)).fixedSize()
                 Text(entry.modified.formatted(date: .numeric, time: .omitted)).fixedSize()
             }.foregroundStyle(ExplorerDesign.muted).help(entry.modified.formatted(date: .complete, time: .standard))
-        case .kind: Text(entry.kind).lineLimit(1).foregroundStyle(ExplorerDesign.muted).help(entry.kind)
-        case .size: Text(entry.sizeText).monospacedDigit().lineLimit(1).foregroundStyle(ExplorerDesign.muted)
+        case .kind: Text(entry.conciseKind).lineLimit(1).foregroundStyle(ExplorerDesign.muted).help(entry.kind)
+        case .size: Text(entry.compactSizeText).monospacedDigit().lineLimit(1).foregroundStyle(ExplorerDesign.muted).help(entry.sizeText)
         case .tags: Text(entry.tags.joined(separator: ", ")).lineLimit(1).foregroundStyle(ExplorerDesign.muted)
         case .availability:
             Label(entry.isCloud ? (entry.isDownloaded ? "Downloaded" : "Online only") : "Local", systemImage: entry.isCloud ? (entry.isDownloaded ? "checkmark.icloud" : "icloud") : "checkmark")
@@ -163,13 +160,13 @@ private struct DetailsColumnHeader: View {
         if tab.options.sort == field { tab.options.descending.toggle() } else { tab.options.sort = field; tab.options.descending = false }
     }
     private func sizeToFit() {
-        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 12)]
+        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: input.fileFontSize)]
         let samples = tab.visibleEntries.prefix(500).map { entry -> String in
             switch column {
             case .name: return entry.name
             case .modified: return entry.modified.formatted(date: .abbreviated, time: .shortened)
-            case .kind: return entry.kind
-            case .size: return entry.sizeText
+            case .kind: return entry.conciseKind
+            case .size: return entry.compactSizeText
             case .tags: return entry.tags.joined(separator: ", ")
             case .availability: return entry.isCloud ? "Downloaded" : "Local"
             }
