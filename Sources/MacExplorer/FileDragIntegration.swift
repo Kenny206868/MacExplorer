@@ -29,12 +29,16 @@ struct FileDragAnchor: NSViewRepresentable {
     func begin(_ event: NSEvent) -> Bool {
         guard let url, let tab, let workspace, workspace.current.id == tab.id else { return false }
         if !tab.selection.contains(url) { workspace.select(url, extend: false, range: false) }
-        let urls = tab.displayEntries.lazy.filter { tab.selection.contains($0.url) }.map(\.url)
-        guard !urls.isEmpty else { return false }
+        let entries = tab.displayEntries.filter { tab.selection.contains($0.url) }
+        guard !entries.isEmpty else { return false }
         let point = convert(event.locationInWindow, from: nil)
         let fallbackIcon = NSWorkspace.shared.icon(forFile: url.path)
-        let items = urls.enumerated().map { index, url -> NSDraggingItem in
-            let item = NSDraggingItem(pasteboardWriter: url as NSURL)
+        let providers: [ExplorerFilePromiseProvider]
+        do { providers = try entries.map { try ExplorerFilePromiseProvider.make(for: $0) } }
+        catch { workspace.fail("Drag unavailable", error.localizedDescription); return false }
+        let items = providers.enumerated().map { index, provider -> NSDraggingItem in
+            let url = entries[index].url
+            let item = NSDraggingItem(pasteboardWriter: provider)
             let offset = CGFloat(min(index, 5)) * 3
             item.setDraggingFrame(CGRect(x: point.x + offset, y: point.y + offset, width: 36, height: 36),
                                   contents: index < 8 ? NSWorkspace.shared.icon(forFile: url.path) : fallbackIcon)
@@ -46,7 +50,7 @@ struct FileDragAnchor: NSViewRepresentable {
         return true
     }
     func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
-        [.copy, .move, .link]
+        context == .withinApplication ? [.copy, .move, .link] : .copy
     }
     func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
         // A URL drop destination performs the transaction. Never remove a source
@@ -67,7 +71,8 @@ struct FileDragAnchor: NSViewRepresentable {
         anchors.add(view)
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]) { event in
-            MainActor.assumeIsolated { self.handle(event) }
+            let consumed = MainActor.assumeIsolated { self.handle(event) == nil }
+            return consumed ? nil : event
         }
     }
     func unregister(_ view: FileDragAnchorView) {
