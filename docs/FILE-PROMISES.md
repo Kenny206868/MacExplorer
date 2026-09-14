@@ -14,7 +14,13 @@ The SwiftUI file surface is hosted by a narrow AppKit drag-destination adapter. 
 
 The inbox retains receivers during asynchronous fulfillment, reports an operation row, supports cancellation, and captures the original destination identity and browser tab. Valid received files are installed using the normal serialized Copy engine, collision dialogs and Undo receipts. Changing tabs while a provider is still writing cannot redirect the drop or its final selection. A failed/skipped import retains the received originals with an explicit recovery path. Timed-out providers retain temporary data rather than deleting a directory that may still be in use; completed cleanup checks the inbox identity. macOS does not provide a cancellation method for an arbitrary source application's promise writer.
 
-`FilePromiseIntegrationTests` performs a native AppKit pasteboard provider-to-receiver round trip. `PromisedImportFileTests` checks inbox boundaries, rejected links and external replacement. Both macOS CI variants run the complete native UI test target serially; core filesystem tests remain parallel in the build job. The CI outcome for each commit, not the presence of the tests, determines validation status.
+## Native test boundaries
+
+`FilePromiseIntegrationTests` validates AppKit provider/receiver pasteboard metadata and invokes the exact production fulfillment worker on its configured operation queue. The inbox accepts an injectable `PromisedFileSource` transport; controlled source completions exercise the real staging validator, serialized filesystem engine, Undo receipts, origin-tab preservation, cancellation, destination replacement and timeout handling. Test engines and operation centers are isolated.
+
+An attempted isolated named-pasteboard provider-to-receiver asynchronous round trip did not complete in the CI harness. This is recorded as an unverified live-transport boundary, not reported as end-to-end drag success. WindowServer-driven cross-process dragging and third-party source compatibility still need separate live integration coverage; deterministic tests do not replace that claim.
+
+`PromisedImportFileTests` checks inbox boundaries, rejected links and external replacement. `FilePromiseHostingTests` verifies that the nested file surface propagates both SwiftUI colorScheme and AppKit appearance: the CI captures exposed a dark-mode regression that a nonblank-only bitmap test could not detect. Both macOS CI variants run the complete native UI test target serially; core filesystem tests remain parallel in the build job. The CI outcome for each commit, not the presence of tests, determines validation status.
 
 Primary API references:
 - https://developer.apple.com/documentation/appkit/supporting-table-view-drag-and-drop-through-file-promises

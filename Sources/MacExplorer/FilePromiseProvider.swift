@@ -26,8 +26,13 @@ import ExplorerCore
     func operationQueue(for filePromiseProvider: NSFilePromiseProvider) -> OperationQueue { queue }
     nonisolated func filePromiseProvider(_ filePromiseProvider: NSFilePromiseProvider, writePromiseTo url: URL,
                                         completionHandler: @escaping @Sendable (Error?) -> Void) {
-        do { try request.write(to: url); completionHandler(nil) }
-        catch { completionHandler(error) }
+        fulfill(to: url, completion: completionHandler)
+    }
+    /// Shared by the AppKit delegate and native queue-contract tests. The
+    /// provider itself never crosses an actor boundary in application code.
+    nonisolated func fulfill(to url: URL, completion: @escaping @Sendable (Error?) -> Void) {
+        do { try request.write(to: url); completion(nil) }
+        catch { completion(error) }
     }
 }
 

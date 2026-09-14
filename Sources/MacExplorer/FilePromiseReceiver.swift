@@ -7,25 +7,40 @@ import ExplorerCore
 @MainActor final class FilePromiseInbox {
     static let shared = FilePromiseInbox()
     private var batches: [UUID: PromiseImportBatch] = [:]
+    private let engine: FileOperationEngine
+    private let center: OperationCenter
+    var activeCount: Int { batches.count }
+    init(engine: FileOperationEngine = .shared, center: OperationCenter = .shared) {
+        self.engine = engine; self.center = center
+    }
 
     @discardableResult func accept(_ pasteboard: NSPasteboard, into destination: URL, owner: ExplorerWorkspace) -> Bool {
         guard let receivers = pasteboard.readObjects(forClasses: [NSFilePromiseReceiver.self], options: nil) as? [NSFilePromiseReceiver],
               !receivers.isEmpty else { return false }
+        return enqueue(receivers.map(AppKitPromiseSource.init), into: destination, owner: owner) != nil
+    }
+    @discardableResult func enqueue(_ sources: [any PromisedFileSource], into destination: URL,
+                                   owner: ExplorerWorkspace, timeout: Duration = .seconds(600)) -> OperationRow? {
+        guard !sources.isEmpty else { return nil }
         do {
-            let batch = try PromiseImportBatch(receivers: receivers, destination: destination, owner: owner)
+            let batch = try PromiseImportBatch(sources: sources, destination: destination, owner: owner,
+                                               engine: engine, center: center, timeout: timeout)
             batches[batch.id] = batch
             let id = batch.id
             batch.onFinish = { [weak self] in self?.batches.removeValue(forKey: id) }
             batch.start()
-            return true
-        } catch { owner.fail("Cannot receive dragged files", error.localizedDescription); return false }
+            return batch.row
+        } catch { owner.fail("Cannot receive dragged files", error.localizedDescription); return nil }
     }
 }
 
 @MainActor private final class PromiseImportBatch {
     let id = UUID()
     var onFinish: (() -> Void)?
-    private let receivers: [NSFilePromiseReceiver]
+    private let sources: [any PromisedFileSource]
+    private let engine: FileOperationEngine
+    private let center: OperationCenter
+    private let deadline: Duration
     private let queue: OperationQueue
     private let staging: URL
     private let stagingIdentity: FileFingerprint
@@ -34,7 +49,7 @@ import ExplorerCore
     private weak var owner: ExplorerWorkspace?
     private weak var origin: BrowserTab?
     private let originLocation: Location
-    private let row = OperationRow(title: "Receive promised files")
+    let row = OperationRow(title: "Receive promised files")
     private var expected: [Int]
     private var received: [Int]
     private var urls: [URL] = []
@@ -45,36 +60,38 @@ import ExplorerCore
     private var operationID: UUID?
     private var timeout: Task<Void, Never>?
 
-    init(receivers: [NSFilePromiseReceiver], destination: URL, owner: ExplorerWorkspace) throws {
-        self.receivers = receivers; self.destination = destination
+    init(sources: [any PromisedFileSource], destination: URL, owner: ExplorerWorkspace,
+         engine: FileOperationEngine, center: OperationCenter, timeout: Duration) throws {
+        self.sources = sources; self.destination = destination
+        self.engine = engine; self.center = center; deadline = timeout
         destinationIdentity = try FileFingerprint(destination)
         self.owner = owner; origin = owner.current; originLocation = owner.current.location
-        expected = receivers.map { max(1, $0.fileTypes.count) }; received = receivers.map { _ in 0 }
+        expected = sources.map { max(1, $0.expectedCount) }; received = sources.map { _ in 0 }
         queue = OperationQueue(); queue.name = "MacExplorer.file-promise-receive"; queue.maxConcurrentOperationCount = 2
         staging = FileManager.default.temporaryDirectory.appendingPathComponent("MacExplorer-Incoming-" + UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
         stagingIdentity = try FileFingerprint(staging)
     }
     func start() {
-        OperationCenter.shared.jobs.insert(row, at: 0)
+        center.jobs.insert(row, at: 0)
         row.progress = FileProgress(completed: 0, total: expected.reduce(0, +), name: "Waiting for the source application", phase: .waiting)
         row.status = "Receiving files from another application"
         row.cancellationAction = { [weak self] in self?.cancel() }
+        let deadline = deadline
         timeout = Task { [weak self] in
-            do { try await Task.sleep(for: .seconds(600)) } catch { return }
+            do { try await Task.sleep(for: deadline) } catch { return }
             guard let self, !self.installing, !self.ended else { return }
-            self.row.control.cancel()
+            self.row.control.cancel(); self.row.cancelled = true
             self.row.errors.append("The source application did not finish its file promises. No unfinished file was installed. Temporary data is retained at \(self.staging.path).")
             self.row.status = "Source application timed out"; self.row.finished = true
             // A faulty provider might still be writing: never delete its active directory.
             self.finish(cleanup: false)
         }
-        for (index, receiver) in receivers.enumerated() {
-            receiver.receivePromisedFiles(atDestination: staging, options: [:], operationQueue: queue) { [weak self] url, error in
-                let failure = error?.localizedDescription
+        for (index, source) in sources.enumerated() {
+            source.receive(into: staging, queue: queue) { [weak self] url, failure in
                 Task { @MainActor in self?.didReceive(url, error: failure, receiver: index) }
             }
-            expected[index] = max(expected[index], receiver.fileNames.count)
+            expected[index] = max(expected[index], source.expectedCount)
         }
         started = true
         installIfReady()
@@ -120,7 +137,7 @@ import ExplorerCore
         let control = row.control
         row.progress = FileProgress(completed: 0, total: urls.count, name: "Preparing received files")
         Task { [self, weak owner] in
-            let result = await FileOperationEngine.shared.run(job, control: control, progress: { [weak row] value in
+            let result = await engine.run(job, control: control, progress: { [weak row] value in
                 Task { @MainActor in row?.acceptProgress(value) }
             }, resolve: { [weak owner] collision in
                 guard let owner else { return CollisionAnswer(.cancel) }
@@ -131,7 +148,6 @@ import ExplorerCore
             row.cancelled = result.cancelled || control.isCancelled
             row.finished = true; row.paused = false
             row.status = row.cancelled ? "Cancelled — completed imports retained" : row.errors.isEmpty ? "Imported \(result.outputs.count) files" : "Import finished with errors"
-            let center = OperationCenter.shared
             if !result.receipt.steps.isEmpty { center.undoStack.append(result.receipt); center.redoStack.removeAll() }
             center.revision += 1
             if let origin, origin.location == originLocation { origin.refresh(selecting: result.outputs) }
@@ -165,13 +181,16 @@ struct FilePromiseDropHost<Content: View>: NSViewRepresentable {
         self.workspace = workspace; self.content = content()
     }
     func makeNSView(context: Context) -> PromiseDropHostingView {
-        let view = PromiseDropHostingView(rootView: AnyView(content.environment(\.self, context.environment)))
-        view.sizingOptions = []; view.workspace = workspace; view.registerPromises()
+        let view = PromiseDropHostingView(rootView: AnyView(content.environment(\.self, context.environment).environment(\.colorScheme, context.environment.colorScheme)))
+        view.sizingOptions = []; view.workspace = workspace
+        view.appearance = NSAppearance(named: context.environment.colorScheme == .dark ? .darkAqua : .aqua)
+        view.registerPromises()
         return view
     }
     func updateNSView(_ view: PromiseDropHostingView, context: Context) {
         view.workspace = workspace
-        view.rootView = AnyView(content.environment(\.self, context.environment))
+        view.appearance = NSAppearance(named: context.environment.colorScheme == .dark ? .darkAqua : .aqua)
+        view.rootView = AnyView(content.environment(\.self, context.environment).environment(\.colorScheme, context.environment.colorScheme))
         view.registerPromises()
     }
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: PromiseDropHostingView, context: Context) -> CGSize? {
