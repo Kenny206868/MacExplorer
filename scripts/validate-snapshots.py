@@ -10,11 +10,12 @@ import struct
 
 def validate(root: pathlib.Path) -> dict:
     captures = json.loads((root / 'captures.json').read_text())
+    captures += json.loads((root / 'archive-captures.json').read_text())
     expected = {'extra-large-icons', 'large-icons', 'medium-icons', 'small-icons',
                 'list', 'details', 'tiles', 'content', 'gallery', 'grouped-selection',
                 'panes-800', 'panes-1024', 'panes-1600', 'empty', 'permission-denied',
                 'dialog-newFolder', 'dialog-newFile', 'dialog-rename', 'dialog-tags',
-                'dialog-connect', 'transfers', 'preferences'}
+                'dialog-connect', 'transfers', 'preferences', 'archive-browser'}
     required = {f'{theme}-{case}' for theme in ('light', 'dark') for case in expected}
     names = [item['name'] for item in captures]
     if len(set(names)) != len(names) or set(names) != required:

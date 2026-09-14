@@ -143,7 +143,7 @@ struct ConflictPrompt: Identifiable {
 }
 
 struct MessageBox: Identifiable { let id = UUID(); let title: String; let message: String }
-enum ExplorerSheet: String, Identifiable { case newFolder, newFile, rename, properties, tags, connect, operations, recovery; var id: String { rawValue } }
+enum ExplorerSheet: String, Identifiable { case newFolder, newFile, rename, properties, tags, connect, operations, recovery, archive; var id: String { rawValue } }
 
 @MainActor final class ExplorerWorkspace: ObservableObject, Identifiable {
     let id = UUID()
@@ -234,7 +234,7 @@ enum ExplorerSheet: String, Identifiable { case newFolder, newFile, rename, prop
         operations.submit(FileJob(permanentDeletion ? .delete : .trash, sources: urls), owner: self)
     }
     func compress() { guard !selectedURLs.isEmpty, let destination else { return }; operations.submit(FileJob(.compress, sources: selectedURLs, destination: destination), owner: self) }
-    func extract() { guard let first = selectedURLs.first, let destination else { return }; operations.submit(FileJob(.extract, sources: [first], destination: destination), owner: self) }
+    func extract() { guard !selectedURLs.isEmpty else { return }; sheet = .archive }
     func alias() { guard let destination else { return }; operations.submit(FileJob(.symbolicLink, sources: selectedURLs, destination: destination, names: Dictionary(uniqueKeysWithValues: selectedURLs.map { ($0.path, $0.lastPathComponent + " link") })), owner: self) }
     func quickLook() { current.previewURL = selectedURLs.first }
     func fail(_ title: String, _ text: String) { message = MessageBox(title: title, message: text) }

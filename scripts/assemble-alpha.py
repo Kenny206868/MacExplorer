@@ -25,6 +25,7 @@ def validate_views(root: pathlib.Path, commit: str) -> dict:
         raise ValueError(f'Native-view artifact is from another commit: {root}')
     report = json.loads((root / 'validation.json').read_text())
     captures = json.loads((root / 'captures.json').read_text())
+    captures += json.loads((root / 'archive-captures.json').read_text())
     hashes = report.get('sha256', {})
     expected = {item['name'] + '.png' for item in captures}
     if not expected or len(expected) != len(captures) or set(hashes) != expected or report['captures'] != len(captures):

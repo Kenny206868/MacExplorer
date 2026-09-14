@@ -15,6 +15,8 @@ struct ExplorerSheetView: View {
             case .connect: ConnectSheet(workspace: workspace)
             case .operations: OperationsView(workspace: workspace)
             case .recovery: RecoveryView(workspace: workspace)
+            case .archive:
+                if let source = workspace.selectedURLs.first { ArchiveBrowserSheet(workspace: workspace, source: source) }
             }
         }.environmentObject(workspace.preferences)
     }

@@ -24,8 +24,9 @@ public struct FileJob: Sendable, Identifiable {
     public let sources: [URL]
     public let destination: URL?
     public let names: [String: String]
-    public init(_ kind: FileJobKind, sources: [URL] = [], destination: URL? = nil, names: [String: String] = [:]) {
-        id = UUID(); self.kind = kind; self.sources = FileNames.independentRoots(sources); self.destination = destination; self.names = names
+    public let archiveOptions: ArchiveReadOptions?
+    public init(_ kind: FileJobKind, sources: [URL] = [], destination: URL? = nil, names: [String: String] = [:], archiveOptions: ArchiveReadOptions? = nil) {
+        id = UUID(); self.kind = kind; self.sources = FileNames.independentRoots(sources); self.destination = destination; self.names = names; self.archiveOptions = archiveOptions
     }
     public var title: String { kind.rawValue.capitalized }
 }
@@ -272,7 +273,7 @@ public actor FileOperationEngine {
                 case .compress: output = try ArchiveService.compress(job.sources, to: destination, control: control)
                 default:
                     guard let source = job.sources.first else { throw ExplorerError.message("Select an archive.") }
-                    output = try ArchiveService.extract(source, to: destination, control: control)
+                    output = try ArchiveService.extract(source, to: destination, control: control, options: job.archiveOptions)
                 }
                 result.outputs = [output]; result.receipt.steps = [try UndoStep(.trash, source: output)]
                 try record(result.receipt)

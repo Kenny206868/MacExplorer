@@ -45,7 +45,7 @@ struct FileContextMenu: View {
             Divider()
             ShareLink(items: urls) { Text("Share / AirDrop…") }
             Button("Compress to ZIP") { perform { workspace.compress() } }
-            Button("Extract Archive") { perform { workspace.extract() } }
+            Button("Browse / Extract Archive…") { perform { workspace.extract() } }
             Button("Create Symbolic Link") { perform { workspace.alias() } }
             Button("Tags…") { perform { workspace.sheet = .tags } }
             Button("Download iCloud Items") { Task { do { try await workspace.current.service.requestDownload(urls); workspace.current.refresh() } catch { workspace.fail("Download failed", error.localizedDescription) } } }
