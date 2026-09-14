@@ -7,20 +7,20 @@ import ExplorerCore
 /// the next main-run-loop turn drive handoff; no animation duration executes it.
 @MainActor final class DeferredSheetAction {
     static let shared = DeferredSheetAction()
-    private final class Pending {
+    @MainActor private final class Pending {
         let token = UUID()
         weak var owner: ExplorerWorkspace?
         weak var window: NSWindow?
         weak var originalSheet: NSWindow?
         let hadWindow: Bool
-        let validate: () throws -> Void
-        let perform: (ExplorerWorkspace) -> Void
+        let validate: @MainActor () throws -> Void
+        let perform: @MainActor (ExplorerWorkspace) -> Void
         var dismissed = false
         var scheduled = false
         var observers: [NSObjectProtocol] = []
         var expiry: DispatchWorkItem?
-        init(owner: ExplorerWorkspace, validate: @escaping () throws -> Void,
-             perform: @escaping (ExplorerWorkspace) -> Void) {
+        init(owner: ExplorerWorkspace, validate: @escaping @MainActor () throws -> Void,
+             perform: @escaping @MainActor (ExplorerWorkspace) -> Void) {
             self.owner = owner; window = owner.window; originalSheet = owner.window?.attachedSheet
             hadWindow = owner.window != nil; self.validate = validate; self.perform = perform
         }
@@ -30,8 +30,8 @@ import ExplorerCore
         }
     }
     private var pending: [UUID: Pending] = [:]
-    func enqueue(for workspace: ExplorerWorkspace, validate: @escaping () throws -> Void,
-                 perform: @escaping (ExplorerWorkspace) -> Void) {
+    func enqueue(for workspace: ExplorerWorkspace, validate: @escaping @MainActor () throws -> Void,
+                 perform: @escaping @MainActor (ExplorerWorkspace) -> Void) {
         remove(workspace.id)
         let action = Pending(owner: workspace, validate: validate, perform: perform)
         pending[workspace.id] = action
