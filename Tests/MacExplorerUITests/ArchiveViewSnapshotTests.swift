@@ -21,17 +21,18 @@ final class ArchiveViewSnapshotTests: XCTestCase {
         for dark in [false, true] {
             captures.append(try await NativeSnapshotCapture.render(AnyView(ArchiveBrowserSheet(workspace: workspace, source: source)),
                 named: dark ? "dark-archive-browser" : "light-archive-browser", size: NSSize(width: 840, height: 650), dark: dark, output: output, verify: { window in
-                    let table = try XCTUnwrap(Self.table(in: window.contentView), "The production archive table must render")
-                    XCTAssertFalse(table.usesAlternatingRowBackgroundColors, "Empty archive canvas must not contain fake zebra rows")
+                    let nativeTable = try XCTUnwrap(Self.findTable(in: window.contentView), "The production archive table must render")
+                    XCTAssertFalse(nativeTable.usesAlternatingRowBackgroundColors, "Empty archive canvas must not contain fake zebra rows")
                 }))
         }
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(captures).write(to: output.appendingPathComponent("archive-captures.json"), options: .atomic)
     }
-    @MainActor private static func table(in view: NSView?) -> NSTableView? {
+    @MainActor private static func findTable(in view: NSView?) -> NSTableView? {
         guard let view else { return nil }
-        if let table = view as? NSTableView { return table }
-        for child in view.subviews { if let table = table(in: child) { return table } }
+        if let nativeTable = view as? NSTableView { return nativeTable }
+        for child in view.subviews { if let nativeTable = findTable(in: child) { return nativeTable } }
         return nil
     }
     static let archive = "UEsDBBQAAAAIAKqxblecUSL7DwAAAA0AAAAQAAAAbmVzdGVkL2hlbGxvLnR4dPNIzcnJV0gsSs7ILEsFAFBLAwQUAAAACACqsW5XDGaWKw8AAAANAAAACQAAAG90aGVyLnR4dPMvyUgtUkjOzytJzSsBAFBLAQIUAxQAAAAIAKqxblecUSL7DwAAAA0AAAAQAAAAAAAAAAAAAACggQAAAABuZXN0ZWQvaGVsbG8udHh0UEsBAhQDFAAAAAgAqrFuVwxmlisPAAAADQAAAAkAAAAAAAAAAAAAAKCBPQAAAG90aGVyLnR4dFBLBQYAAAAAAgACAHUAAABzAAAAAAA="
+}
