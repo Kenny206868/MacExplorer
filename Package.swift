@@ -10,6 +10,7 @@ let package = Package(
         .systemLibrary(name: "CLibArchive", path: "Sources/CLibArchive"),
         .target(name: "ExplorerCore", dependencies: ["CLibArchive"], linkerSettings: [.linkedLibrary("archive")]),
         .executableTarget(name: "MacExplorer", dependencies: ["ExplorerCore", .product(name: "Sparkle", package: "Sparkle")], linkerSettings: [.linkedFramework("AppKit"), .linkedFramework("QuickLookThumbnailing"), .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]),
-        .testTarget(name: "ExplorerCoreTests", dependencies: ["ExplorerCore"])
+        .testTarget(name: "ExplorerCoreTests", dependencies: ["ExplorerCore"]),
+        .testTarget(name: "MacExplorerUITests", dependencies: ["MacExplorer", "ExplorerCore"])
     ]
 )
