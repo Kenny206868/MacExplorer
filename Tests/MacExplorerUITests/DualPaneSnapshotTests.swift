@@ -4,7 +4,6 @@ import AppKit
 import ExplorerCore
 @testable import MacExplorer
 
-/// Populated production panes: the second browser is not a duplicated bitmap.
 final class DualPaneSnapshotTests: XCTestCase {
     @MainActor private final class Probe { var regions: [String: CGRect] = [:] }
     @MainActor func testPopulatedDualPaneAndInputMatrix() async throws {
@@ -20,8 +19,7 @@ final class DualPaneSnapshotTests: XCTestCase {
         try fm.createDirectory(at: right, withIntermediateDirectories: false)
         defer {
             preferences.value = previous; input.touchFriendly = previousTouch; DetailsColumnStore.shared.value = previousColumns
-            OperationCenter.shared.jobs = previousJobs; AppRouter.shared.active = nil
-            try? fm.removeItem(at: fixture)
+            OperationCenter.shared.jobs = previousJobs; AppRouter.shared.active = nil; try? fm.removeItem(at: fixture)
         }
         let names = ["Brand guidelines.md", "Budget 2026.csv", "Meeting notes.txt", "Project proposal.txt", "Release checklist.md", "Research notes.txt", "Website roadmap.md", "Zażółć gęślą jaźń.txt"]
         for (index, name) in names.enumerated() {
@@ -29,9 +27,7 @@ final class DualPaneSnapshotTests: XCTestCase {
             try Data((String(repeating: "MacExplorer design fixture.\n", count: 40 + index)).utf8).write(to: url)
             try fm.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1_789_099_200)], ofItemAtPath: url.path)
         }
-        for name in ["Brand kit", "Campaign images", "Documentation", "Screenshots"] {
-            try fm.createDirectory(at: right.appendingPathComponent(name), withIntermediateDirectories: false)
-        }
+        for name in ["Brand kit", "Campaign images", "Documentation", "Screenshots"] { try fm.createDirectory(at: right.appendingPathComponent(name), withIntermediateDirectories: false) }
         try Data("Release manifest\n".utf8).write(to: right.appendingPathComponent("Manifest.txt"))
         try makePoster(at: right.appendingPathComponent("Color study.png"))
         let leftEntries = try names.map { try FileEntry(url: left.appendingPathComponent($0)) }
@@ -47,8 +43,7 @@ final class DualPaneSnapshotTests: XCTestCase {
             ("dual-inspector", 1760, 900, .sideBySide, .primary, false),
             ("dual-touch", 1440, 900, .sideBySide, .secondary, true)
         ]
-        var captures: [NativeViewSnapshotTests.Capture] = []
-        var evidence: [[String: String]] = []
+        var captures: [NativeViewSnapshotTests.Capture] = [], evidence: [[String: String]] = []
         for dark in [false, true] {
             preferences.value.theme = dark ? "dark" : "light"
             for (name, width, height, preferred, side, touch) in scenarios {
@@ -63,6 +58,7 @@ final class DualPaneSnapshotTests: XCTestCase {
                 root.current.selection = Set(leftEntries.prefix(2).map(\.url))
                 other.current.selection = Set(rightEntries.filter { $0.url.pathExtension == "png" }.map(\.url))
                 other.current.options.view = .large
+                root.tabs.append(BrowserTab(.home)); other.tabs.append(BrowserTab(.computer))
                 root.touchSelecting = touch; other.touchSelecting = touch
                 dual.geometry.orientation = preferred; dual.geometry.focused = side
                 let probe = Probe(), captureName = (dark ? "dark-" : "light-") + name
@@ -75,20 +71,21 @@ final class DualPaneSnapshotTests: XCTestCase {
                 let policy = DualPaneLayout(width: files.width, height: files.height, preferred: preferred, ratio: 0.5)
                 for rect in [first, second] {
                     XCTAssertGreaterThan(rect.width, 300, captureName); XCTAssertGreaterThan(rect.height, 160, captureName)
-                    XCTAssertGreaterThanOrEqual(rect.minX, files.minX - 1, captureName)
-                    XCTAssertLessThanOrEqual(rect.maxX, files.maxX + 1, captureName)
-                    XCTAssertGreaterThanOrEqual(rect.minY, files.minY - 1, captureName)
-                    XCTAssertLessThanOrEqual(rect.maxY, files.maxY + 1, captureName)
+                    XCTAssertGreaterThanOrEqual(rect.minX, files.minX - 1, captureName); XCTAssertLessThanOrEqual(rect.maxX, files.maxX + 1, captureName)
+                    XCTAssertGreaterThanOrEqual(rect.minY, files.minY - 1, captureName); XCTAssertLessThanOrEqual(rect.maxY, files.maxY + 1, captureName)
+                }
+                for (side, pane) in [("primary", first), ("secondary", second)] {
+                    let address = try XCTUnwrap(probe.regions["pane.address." + side], captureName)
+                    XCTAssertGreaterThan(address.width, 160, "The location must not collapse into an ellipsis: " + captureName)
+                    XCTAssertGreaterThanOrEqual(address.minX, pane.minX, captureName); XCTAssertLessThanOrEqual(address.maxX, pane.maxX, captureName)
                 }
                 XCTAssertTrue(first.intersection(second).isNull, captureName)
-                if policy.orientation == .sideBySide {
-                    XCTAssertEqual(first.height, second.height, accuracy: 1, captureName)
-                    XCTAssertEqual(second.minX - first.maxX, 7, accuracy: 1, captureName)
-                } else { XCTAssertEqual(second.minY - first.maxY, 7, accuracy: 1, captureName) }
-                XCTAssertEqual(root.current.selection.count, 2, captureName)
-                XCTAssertEqual(other.current.selection.count, 1, captureName)
+                if policy.orientation == .sideBySide { XCTAssertEqual(first.height, second.height, accuracy: 1, captureName); XCTAssertEqual(second.minX - first.maxX, 7, accuracy: 1, captureName) }
+                else { XCTAssertEqual(second.minY - first.maxY, 7, accuracy: 1, captureName) }
+                XCTAssertEqual(root.current.selection.count, 2, captureName); XCTAssertEqual(other.current.selection.count, 1, captureName)
+                XCTAssertEqual(root.tabs.count, 2); XCTAssertEqual(other.tabs.count, 2)
                 XCTAssertEqual(dual.geometry.orientation, preferred, "Responsive fallback must not overwrite saved intent")
-                evidence.append(["capture": captureName, "orientation": policy.orientation.rawValue, "focus": side.rawValue, "touchFriendly": String(touch)])
+                evidence.append(["capture": captureName, "orientation": policy.orientation.rawValue, "focus": side.rawValue, "touchFriendly": String(touch), "addressWidths": "noncollapsed", "tabsPerPane": "2"])
                 root.tabs.forEach { $0.stop() }; other.tabs.forEach { $0.stop() }
             }
             input.touchFriendly = true
@@ -108,10 +105,8 @@ final class DualPaneSnapshotTests: XCTestCase {
     @MainActor private func makePoster(at url: URL) throws {
         let image = NSImage(size: NSSize(width: 640, height: 480)); image.lockFocus()
         NSColor(srgbRed: 0.09, green: 0.18, blue: 0.30, alpha: 1).setFill(); NSRect(x: 0, y: 0, width: 640, height: 480).fill()
-        NSColor(srgbRed: 0.18, green: 0.69, blue: 0.71, alpha: 1).setFill()
-        NSBezierPath(roundedRect: NSRect(x: 60, y: 70, width: 340, height: 340), xRadius: 52, yRadius: 52).fill()
-        NSColor(srgbRed: 0.97, green: 0.73, blue: 0.37, alpha: 1).setFill()
-        NSBezierPath(ovalIn: NSRect(x: 310, y: 120, width: 260, height: 260)).fill(); image.unlockFocus()
+        NSColor(srgbRed: 0.18, green: 0.69, blue: 0.71, alpha: 1).setFill(); NSBezierPath(roundedRect: NSRect(x: 60, y: 70, width: 340, height: 340), xRadius: 52, yRadius: 52).fill()
+        NSColor(srgbRed: 0.97, green: 0.73, blue: 0.37, alpha: 1).setFill(); NSBezierPath(ovalIn: NSRect(x: 310, y: 120, width: 260, height: 260)).fill(); image.unlockFocus()
         let bitmap = try XCTUnwrap(image.tiffRepresentation.flatMap(NSBitmapImageRep.init(data:)))
         try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: url)
     }

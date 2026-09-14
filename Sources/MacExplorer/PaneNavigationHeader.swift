@@ -16,13 +16,14 @@ struct PaneNavigationHeader: View {
         while value.path != "/" { value = value.deletingLastPathComponent(); result.insert(value, at: 0) }
         return result
     }
+    private var side: String { workspace.parentWorkspace == nil ? "primary" : "secondary" }
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 4) {
                 CommandIcon("Back", "chevron.left", disabled: !tab.history.canGoBack) { workspace.activatePane(); tab.back() }
                 CommandIcon("Forward", "chevron.right", disabled: !tab.history.canGoForward) { workspace.activatePane(); tab.forward() }
                 CommandIcon("Parent folder", "arrow.up", disabled: workspace.destination == nil) { workspace.activatePane(); tab.up() }
-                pathControl
+                pathControl.frame(maxWidth: .infinity).layoutPriority(1).explorerRegion("pane.address." + side)
                 CommandIcon("Search this pane", "magnifyingglass", selected: showsSearch || !tab.query.isEmpty) {
                     workspace.activatePane(); showsSearch.toggle(); workspace.searchFocused = showsSearch; queryFocused = showsSearch
                 }
@@ -45,22 +46,24 @@ struct PaneNavigationHeader: View {
                     .onSubmit { let value = path; pathFocused = false; workspace.addressFocused = false; workspace.goToAddress(value) }
                     .onExitCommand { pathFocused = false; workspace.focusFileSurface() }
             } else {
-                Menu {
-                    Button("Edit Location…", action: edit)
-                    if let url = workspace.destination { Button("Copy Path") { NativeIntegration.copyPaths([url]) } }
-                    Divider()
-                    ForEach(parents, id: \.self) { url in Button(url.path == "/" ? "Macintosh HD" : url.lastPathComponent) { workspace.activatePane(); workspace.navigate(.folder(url)) } }
-                } label: {
-                    HStack(spacing: 6) {
-                        if parents.count > 1 { Text("…").foregroundStyle(ExplorerDesign.muted); Image(systemName: "chevron.right").font(.system(size: 8)) }
-                        Text(tab.location.title).lineLimit(1).truncationMode(.middle).fontWeight(.medium)
-                        Spacer(minLength: 0); Image(systemName: "chevron.down").font(.system(size: 8))
-                    }.contentShape(Rectangle())
-                }.menuStyle(.borderlessButton).menuIndicator(.hidden).help(tab.location.directory?.path ?? tab.location.title)
+                Button(action: edit) {
+                    Text(tab.location.title).fontWeight(.medium).lineLimit(1).truncationMode(.middle)
+                        .frame(maxWidth: .infinity, alignment: .leading).frame(height: input.target).contentShape(Rectangle())
+                }.buttonStyle(.plain).accessibilityLabel("Edit location: " + tab.location.title)
             }
-        }.font(.system(size: 12)).padding(.horizontal, 10).frame(height: input.target)
+            Menu {
+                Button("Edit Location…", action: edit)
+                if let url = workspace.destination { Button("Copy Path") { NativeIntegration.copyPaths([url]) } }
+                Divider()
+                ForEach(parents, id: \.self) { url in
+                    Button(url.path == "/" ? "Macintosh HD" : url.lastPathComponent) { workspace.activatePane(); workspace.navigate(.folder(url)) }
+                }
+            } label: { Image(systemName: "chevron.down").font(.system(size: 8)).frame(width: 20, height: input.target) }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().accessibilityLabel("Parent folders")
+        }.font(.system(size: 12)).padding(.leading, 10).padding(.trailing, 5).frame(maxWidth: .infinity).frame(height: input.target)
             .background(ExplorerDesign.canvas, in: RoundedRectangle(cornerRadius: 6))
             .overlay(RoundedRectangle(cornerRadius: 6).stroke(pathFocused ? Color.accentColor : ExplorerDesign.separator, lineWidth: 1))
+            .help(tab.location.directory?.path ?? tab.location.title)
     }
     private var searchControl: some View {
         HStack(spacing: 8) {
@@ -99,8 +102,7 @@ struct PaneTabHeader: View {
                     }
                 }.onChange(of: workspace.activeID) { _, id in proxy.scrollTo(id) }
             }
-            CommandIcon("New tab in this pane", "plus") { workspace.activatePane(); workspace.newTab() }
-                .modifier(TabDropTarget(workspace: workspace, before: nil))
+            CommandIcon("New tab in this pane", "plus") { workspace.activatePane(); workspace.newTab() }.modifier(TabDropTarget(workspace: workspace, before: nil))
             Menu {
                 ForEach(workspace.tabs) { tab in Button(tab.location.title) { workspace.activatePane(); workspace.activeID = tab.id } }
                 Divider(); Button("Reopen Closed Tab") { workspace.reopenClosedTab() }.disabled(workspace.closedTabs.isEmpty)
