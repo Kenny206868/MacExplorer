@@ -37,10 +37,10 @@ import ExplorerCore
         pending[workspace.id] = action
         if action.hadWindow {
             let id = workspace.id, token = action.token
-            // The key-window notification can precede or follow onDismiss.
-            // Observe both, but never execute until onDismiss has also arrived.
-            for name in [NSWindow.didEndSheetNotification, NSWindow.didBecomeKeyNotification,
-                         NSWindow.didResignKeyNotification, NSWindow.didBecomeMainNotification] {
+            // Window focus may return before or after SwiftUI's onDismiss.
+            // Observe both sides of that transition, but require onDismiss too.
+            for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification,
+                         NSWindow.didBecomeMainNotification] {
                 action.observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                     MainActor.assumeIsolated { self?.schedule(id, token: token) }
                 })
