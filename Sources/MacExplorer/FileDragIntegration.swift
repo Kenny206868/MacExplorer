@@ -80,6 +80,14 @@ struct FileDragAnchor: NSViewRepresentable {
         if candidate === view { candidate = nil }
         if anchors.allObjects.isEmpty, activeSource == nil { removeMonitor() }
     }
+    func folder(at point: NSPoint, in window: NSWindow?, workspace: ExplorerWorkspace) -> URL? {
+        guard let window else { return nil }
+        return anchors.allObjects.first { view in
+            view.window === window && view.workspace === workspace && !view.isHiddenOrHasHiddenAncestor
+                && view.visibleRect.contains(view.convert(point, from: nil))
+                && workspace.current.entries.contains { $0.url == view.url && $0.canBrowse }
+        }?.url
+    }
     func endSession() {
         activeSource = nil; candidate = nil
         if anchors.allObjects.isEmpty { removeMonitor() }

@@ -6,14 +6,18 @@ import ExplorerCore
 /// filesystem requests reach the worker queue supplied to AppKit.
 @MainActor final class ExplorerPromiseDelegate: NSObject, NSFilePromiseProviderDelegate {
     nonisolated let request: FilePromiseExport
+    nonisolated private static let sharedQueue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.name = "MacExplorer.file-promise-export"
+        queue.qualityOfService = .userInitiated
+        queue.maxConcurrentOperationCount = 2
+        return queue
+    }()
     nonisolated let queue: OperationQueue
 
     init(source: URL) throws {
         request = try FilePromiseExport(source: source)
-        queue = OperationQueue()
-        queue.name = "MacExplorer.file-promise-export"
-        queue.qualityOfService = .userInitiated
-        queue.maxConcurrentOperationCount = 1
+        queue = Self.sharedQueue
         super.init()
     }
     func filePromiseProvider(_ filePromiseProvider: NSFilePromiseProvider, fileNameForType fileType: String) -> String {
@@ -40,7 +44,8 @@ import ExplorerCore
         return provider
     }
     override func writableTypes(for pasteboard: NSPasteboard) -> [NSPasteboard.PasteboardType] {
-        Array(Set(super.writableTypes(for: pasteboard) + [.fileURL]))
+        let types = super.writableTypes(for: pasteboard)
+        return types.contains(.fileURL) ? types : types + [.fileURL]
     }
     override func pasteboardPropertyList(forType type: NSPasteboard.PasteboardType) -> Any? {
         if type == .fileURL { return (userInfo as? ExplorerPromiseDelegate)?.request.source.absoluteString }

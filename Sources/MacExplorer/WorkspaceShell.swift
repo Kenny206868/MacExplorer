@@ -23,7 +23,8 @@ struct WorkspaceShell: View {
                     ExplorerSidebar(workspace: workspace, tab: tab)
                         .frame(minWidth: plan.sidebarMinimum, idealWidth: plan.sidebarIdeal, maxWidth: 264)
                         .explorerRegion("sidebar")
-                    fileContent.frame(minWidth: plan.contentMinimum, maxWidth: .infinity, maxHeight: .infinity)
+                    FilePromiseDropHost(workspace: workspace) { fileContent }
+                        .frame(minWidth: plan.contentMinimum, maxWidth: .infinity, maxHeight: .infinity)
                         .explorerRegion("files")
                     if plan.combinesAuxiliaryPanes {
                         VStack(spacing: 0) {
