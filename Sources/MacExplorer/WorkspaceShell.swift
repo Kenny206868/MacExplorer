@@ -20,8 +20,6 @@ struct WorkspaceShell: View {
             VStack(spacing: 0) {
                 ExplorerTabStrip(workspace: workspace).explorerRegion("tabs")
                 ExplorerRule()
-                ExplorerCommandBar(workspace: workspace, tab: tab, compact: plan.compactToolbar).explorerRegion("commands")
-                ExplorerRule()
                 ExplorerAddressBar(workspace: workspace, tab: tab, searchWidth: plan.searchWidth).explorerRegion("address")
                 ExplorerRule()
                 HStack(spacing: 0) {
@@ -50,7 +48,7 @@ struct WorkspaceShell: View {
                     }
                 }.frame(maxHeight: .infinity)
                 ExplorerRule()
-                statusBar.explorerRegion("status")
+                ExplorerStatusBar(workspace: workspace, tab: tab).explorerRegion("status")
             }.coordinateSpace(name: "Explorer.workspace")
                 .foregroundStyle(ExplorerDesign.text).background(ExplorerDesign.canvas)
                 .quickLookPreview($tab.previewURL)
@@ -92,29 +90,5 @@ struct WorkspaceShell: View {
             if let url = workspace.selectedURLs.first { NativePreview(url: url).frame(maxWidth: .infinity, maxHeight: .infinity) }
             else { ContentUnavailableView("Select a file", systemImage: "doc.viewfinder", description: Text("Preview documents, images, audio, and video with Quick Look.")).frame(maxWidth: .infinity, maxHeight: .infinity) }
         }.background(ExplorerDesign.canvas)
-    }
-    private var statusBar: some View {
-        HStack(spacing: 12) {
-            if tab.loading { ProgressView().controlSize(.mini); Text("Loading…") } else { Text("\(tab.entries.count) items") }
-            if !tab.selection.isEmpty { Text("\(tab.selection.count) selected · " + ByteCountFormatter.string(fromByteCount: selectedBytes, countStyle: .file)).lineLimit(1) }
-            Spacer(minLength: 4)
-            Button { workspace.sheet = .operations } label: {
-                HStack(spacing: 6) {
-                    Circle().fill(operations.runningCount > 0 ? Color.accentColor : .green).frame(width: 5, height: 5)
-                    Text(operations.runningCount > 0 ? "\(operations.runningCount) in progress" : "File operations")
-                }
-            }.help("Show transfer progress and operation history")
-            Rectangle().fill(ExplorerDesign.separator).frame(width: 1, height: 16)
-            Button { tab.options.view = .details } label: { Image(systemName: "list.bullet").frame(width: 26, height: 23) }
-                .buttonStyle(ExplorerIconStyle(selected: tab.options.view == .details)).help("Details view").accessibilityLabel("Details view")
-            Button { tab.options.view = .large } label: { Image(systemName: "square.grid.2x2").frame(width: 26, height: 23) }
-                .buttonStyle(ExplorerIconStyle(selected: tab.options.view == .large)).help("Large icons").accessibilityLabel("Large icons view")
-        }.font(.system(size: 10)).foregroundStyle(ExplorerDesign.muted).buttonStyle(.plain)
-            .padding(.horizontal, 14).frame(height: ExplorerDesign.statusHeight).background(ExplorerDesign.chrome)
-    }
-    private var selectedBytes: Int64 {
-        workspace.selected.reduce(0) { total, entry in
-            let (sum, overflow) = total.addingReportingOverflow(max(0, entry.size)); return overflow ? .max : sum
-        }
     }
 }

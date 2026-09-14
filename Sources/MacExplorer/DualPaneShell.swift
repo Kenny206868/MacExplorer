@@ -10,13 +10,11 @@ struct WindowWorkspaceShell: View {
         else { WorkspaceShell(workspace: workspace, tab: workspace.current) }
     }
 }
-
-/// Shared window chrome, independent navigation in each file pane. There is no
-/// third address bar competing with the two locations being operated on.
+/// Native window chrome sits above independent file panes; neither pane needs
+/// a third address bar or a second window title rendered inside the content.
 struct DualPaneShell: View {
     @ObservedObject var controller: DualPaneController
     @EnvironmentObject private var preferences: PreferenceStore
-    @ObservedObject private var input = InputPreferences.shared
     @SceneStorage("MacExplorer.Design.SidebarWidth") private var sidebar = 211.0
     @SceneStorage("MacExplorer.Design.InspectorWidth") private var inspector = 254.0
     @State private var auxiliaryTab = "Details"
@@ -28,10 +26,6 @@ struct DualPaneShell: View {
                 let plan = WorkspaceLayout(width: geometry.size.width, preview: false, inspector: auxiliary)
                 let allocation = plan.allocate(sidebar: sidebar, inspector: inspector, hasInspector: auxiliary, hasPreview: false)
                 VStack(spacing: 0) {
-                    DualWorkspaceTitlebar(controller: controller).explorerRegion("tabs")
-                    ExplorerRule()
-                    ExplorerCommandBar(workspace: active, tab: active.current, compact: plan.compactToolbar || input.touchFriendly).explorerRegion("commands")
-                    ExplorerRule()
                     HStack(spacing: 0) {
                         ExplorerSidebar(workspace: active, tab: active.current).frame(width: allocation.sidebar).explorerRegion("sidebar")
                         PaneDivider(title: "Sidebar width", value: $sidebar, actual: allocation.sidebar)
@@ -83,25 +77,6 @@ struct DualPaneShell: View {
         }.background(ExplorerDesign.canvas)
     }
 }
-
-private struct DualWorkspaceTitlebar: View {
-    @ObservedObject var controller: DualPaneController
-    var body: some View {
-        HStack(spacing: 10) {
-            Color.clear.frame(width: 74).accessibilityHidden(true)
-            Image(systemName: "rectangle.split.2x1").foregroundStyle(Color.accentColor)
-            Text("MacExplorer").font(.system(size: 12, weight: .semibold))
-            Text("Dual panes").font(.system(size: 11)).foregroundStyle(ExplorerDesign.muted)
-            Spacer(minLength: 8)
-            Picker("Pane arrangement", selection: $controller.geometry.orientation) {
-                Image(systemName: "rectangle.split.2x1").tag(PaneOrientation.sideBySide).help("Side by side")
-                Image(systemName: "rectangle.split.1x2").tag(PaneOrientation.stacked).help("Stacked")
-            }.labelsHidden().pickerStyle(.segmented).frame(width: 88)
-            CommandIcon("Keyboard and gestures", "keyboard") { controller.active.sheet = .keyboardHelp }
-        }.padding(.trailing, 12).frame(height: ExplorerDesign.titleHeight).background(ExplorerDesign.chrome)
-    }
-}
-
 private struct DualFilePane: View {
     @ObservedObject var workspace: ExplorerWorkspace
     @ObservedObject var controller: DualPaneController
@@ -128,18 +103,7 @@ private struct DualFilePane: View {
                     }
             }.frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
             ExplorerRule()
-            HStack(spacing: 8) {
-                Circle().fill(active ? Color.accentColor : ExplorerDesign.muted.opacity(0.4)).frame(width: 5, height: 5)
-                Text("\(workspace.current.entries.count) items").lineLimit(1)
-                if !workspace.current.selection.isEmpty { Text("· \(workspace.current.selection.count) selected").lineLimit(1) }
-                Spacer(minLength: 0)
-                if workspace.current.loading { ProgressView().controlSize(.mini) }
-                if !input.touchFriendly {
-                    CommandIcon("Details", "list.bullet", selected: workspace.current.options.view == .details) { workspace.current.options.view = .details }
-                    CommandIcon("Icons", "square.grid.2x2", selected: workspace.current.options.view == .large) { workspace.current.options.view = .large }
-                }
-            }.font(.system(size: 10)).foregroundStyle(ExplorerDesign.muted).padding(.horizontal, 12)
-                .frame(height: 34).background(ExplorerDesign.chrome)
+            ExplorerStatusBar(workspace: workspace, tab: workspace.current, compact: true, active: active)
             if input.touchFriendly { TouchFileBar(workspace: workspace) }
         }.frame(maxWidth: .infinity, maxHeight: .infinity).background(ExplorerDesign.canvas)
             .overlay(alignment: .top) { Rectangle().fill(active ? Color.accentColor : ExplorerDesign.separator).frame(height: active ? 2 : 1).allowsHitTesting(false) }
@@ -148,7 +112,6 @@ private struct DualFilePane: View {
             .onAppear { workspace.window = controller.primary?.window }
     }
 }
-
 private struct DualTransferBar: View {
     @ObservedObject var controller: DualPaneController
     @ObservedObject var workspace: ExplorerWorkspace
@@ -160,13 +123,15 @@ private struct DualTransferBar: View {
     private func controls(detailed: Bool) -> some View {
         HStack(spacing: 10) {
             Menu {
+                Picker("Pane Arrangement", selection: $controller.geometry.orientation) {
+                    Text("Side by Side").tag(PaneOrientation.sideBySide); Text("Stacked").tag(PaneOrientation.stacked)
+                }
                 Button("Switch Active Pane") { controller.focus(controller.geometry.focused.other, files: true) }
                 Button("Equal Pane Sizes") { controller.geometry.ratio = 0.5 }
                 Button("Swap Locations") { controller.swapLocations() }
                 Button("Same Location in Other Pane") { controller.copyLocation(from: workspace) }
                 Divider(); Button("Close Dual Panes") { workspace.toggleDualPane() }
-            } label: { Label("Panes", systemImage: "rectangle.split.2x1").font(.system(size: 11)) }
-                .menuStyle(.borderlessButton).fixedSize()
+            } label: { Label("Panes", systemImage: "rectangle.split.2x1").font(.system(size: 11)) }.menuStyle(.borderlessButton).fixedSize()
             if detailed {
                 Text(workspace.current.location.title).fontWeight(.medium).lineLimit(1)
                 Image(systemName: "arrow.right").foregroundStyle(Color.accentColor)
@@ -177,14 +142,13 @@ private struct DualTransferBar: View {
             Button { controller.requestTransfer(from: workspace, move: false) } label: { Label(detailed ? "Copy to other pane" : "Copy", systemImage: "doc.on.doc") }
                 .buttonStyle(ExplorerButtonStyle(primary: true))
                 .disabled(workspace.selected.isEmpty || controller.other(than: workspace)?.destination == nil)
-                .help("Copy to \(controller.other(than: workspace)?.destination?.path ?? "the other pane") · ⌘⌥C")
+                .help("Copy to the other pane · ⌘⌥C")
             Button { controller.requestTransfer(from: workspace, move: true) } label: { Label("Move…", systemImage: "arrow.right.doc.on.clipboard") }
                 .disabled(workspace.selected.isEmpty || controller.other(than: workspace)?.destination == nil)
-                .help("Confirm a move to \(controller.other(than: workspace)?.destination?.path ?? "the other pane") · ⌘⌥M")
+                .help("Confirm a move to the other pane · ⌘⌥M")
         }.font(.system(size: 11)).buttonStyle(ExplorerButtonStyle())
     }
 }
-
 private struct DualPaneGrip: View {
     @ObservedObject var controller: DualPaneController
     let layout: DualPaneLayout

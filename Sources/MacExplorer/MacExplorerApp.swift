@@ -10,14 +10,14 @@ import ExplorerCore
     var body: some Scene {
         WindowGroup("MacExplorer", id: "explorer") {
             ExplorerWindow().environmentObject(preferences).environmentObject(updater).preferredColorScheme(preferences.colorScheme)
-        }.defaultSize(width: 1260, height: 800).windowStyle(.hiddenTitleBar)
+        }.defaultSize(width: 1260, height: 800).windowStyle(.titleBar)
             .commands { ExplorerCommands(updater: updater) }
         WindowGroup("MacExplorer", id: "detached", for: BrowserSession.self) { session in
             ExplorerWindow(session: session.wrappedValue).environmentObject(preferences).environmentObject(updater).preferredColorScheme(preferences.colorScheme)
-        }.defaultSize(width: 1260, height: 800).windowStyle(.hiddenTitleBar)
+        }.defaultSize(width: 1260, height: 800).windowStyle(.titleBar)
         WindowGroup("MacExplorer", id: "restored-session", for: WindowSession.self) { session in
             ExplorerWindow(windowSession: session.wrappedValue).environmentObject(preferences).environmentObject(updater).preferredColorScheme(preferences.colorScheme)
-        }.defaultSize(width: 1260, height: 800).windowStyle(.hiddenTitleBar)
+        }.defaultSize(width: 1260, height: 800).windowStyle(.titleBar)
         Window("Window History", id: "session-history") {
             SessionHistoryView().environmentObject(preferences).preferredColorScheme(preferences.colorScheme)
         }.defaultSize(width: 680, height: 480)

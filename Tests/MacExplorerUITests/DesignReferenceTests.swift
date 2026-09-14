@@ -54,19 +54,18 @@ final class DesignReferenceTests: XCTestCase {
                 let inspector = try XCTUnwrap(geometry["inspector"])
                 XCTAssertEqual(inspector.width, 254, accuracy: 0.5, captureName)
                 XCTAssertEqual(try XCTUnwrap(geometry["files"]).width, 793, accuracy: 0.5, captureName)
-                for (region, height) in [("tabs", 48.0), ("commands", 54), ("address", 54), ("status", 30)] { XCTAssertEqual(try XCTUnwrap(geometry[region]).height, height, accuracy: 0.5, captureName + " " + region) }
+                for (region, height) in [("tabs", 42.0), ("address", 54), ("status", 30)] { XCTAssertEqual(try XCTUnwrap(geometry[region]).height, height, accuracy: 0.5, captureName + " " + region) }
+                XCTAssertNil(geometry["commands"], "The real native toolbar replaces duplicate content commands")
                 let bitmap = try XCTUnwrap(NSBitmapImageRep(data: Data(contentsOf: output.appendingPathComponent(captureName + ".png"))))
-                try assertColor(bitmap, point: CGPoint(x: 880, y: 22), rgb: dark ? 0x292B33 : 0xF7F7F9, label: captureName + " title chrome")
+                try assertColor(bitmap, point: CGPoint(x: 880, y: 20), rgb: dark ? 0x292B33 : 0xF7F7F9, label: captureName + " tab chrome")
                 try assertColor(bitmap, point: CGPoint(x: 6, y: 510), rgb: dark ? 0x25272F : 0xF3F4F7, label: captureName + " sidebar")
                 try assertColor(bitmap, point: CGPoint(x: inspector.minX + 4, y: 735), rgb: dark ? 0x202228 : 0xFFFFFF, label: captureName + " inspector canvas")
                 if name == "details" {
                     let frame = try XCTUnwrap(geometry["files"]), index = try XCTUnwrap(tab.displayEntries.firstIndex { $0.url == entries[3].url })
-                    // The four-point leading row inset contains neither text nor
-                    // native scroller pixels. Keep the actual reference RGB values.
-                    try assertColor(bitmap, point: CGPoint(x: frame.minX + 4, y: frame.minY + 34 + CGFloat(index) * 36 + 18), rgb: dark ? 0x153E6D : 0xE4F0FF, label: captureName + " selected row")
+                    try assertColor(bitmap, point: CGPoint(x: frame.minX + 3, y: frame.minY + 34 + CGFloat(index) * 36 + 18), rgb: dark ? 0x153E6D : 0xE4F0FF, label: captureName + " selected row")
                     try assertColor(bitmap, point: CGPoint(x: frame.minX + 35, y: 720), rgb: dark ? 0x202228 : 0xFFFFFF, label: captureName + " no empty zebra rows")
                 }
-                evidence.append(["capture": captureName, "geometry": "211 sidebar / 793 files / 254 inspector", "palette": "encoded sRGB surface and selection channels checked"])
+                evidence.append(["capture": captureName, "geometry": "211 sidebar / 793 files / 254 inspector; native toolbar outside content", "palette": "encoded sRGB surface and selection channels checked"])
                 workspace.tabs.forEach { $0.stop() }
             }
         }

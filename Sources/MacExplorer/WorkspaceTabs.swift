@@ -63,29 +63,29 @@ struct BrowserSession: Codable, Hashable, Sendable {
         activeID = tab.id; saveSession()
     }
 }
-
 struct ExplorerTabStrip: View {
     @ObservedObject var workspace: ExplorerWorkspace
+    @ObservedObject private var input = InputPreferences.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         HStack(alignment: .bottom, spacing: 5) {
-            Color.clear.frame(width: 84, height: 1).accessibilityHidden(true)
+            Color.clear.frame(width: 8, height: 1).accessibilityHidden(true)
             ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .bottom, spacing: 5) {
                         ForEach(workspace.tabs) { tab in WorkspaceTabItem(workspace: workspace, tab: tab, titlebar: true).id(tab.id) }
                         CommandIcon("New tab (⌘T / Ctrl+T)", "plus") { workspace.newTab() }
-                            .modifier(TabDropTarget(workspace: workspace, before: nil)).padding(.bottom, 2)
-                    }.padding(.top, 10)
+                            .modifier(TabDropTarget(workspace: workspace, before: nil))
+                    }.padding(.vertical, 4)
                 }.onChange(of: workspace.activeID) { _, id in withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { proxy.scrollTo(id) } }
             }
-            Color.clear.frame(width: 22, height: 36).contentShape(Rectangle()).modifier(TabDropTarget(workspace: workspace, before: nil))
+            Color.clear.frame(width: 16, height: 34).contentShape(Rectangle()).modifier(TabDropTarget(workspace: workspace, before: nil))
             Menu {
                 ForEach(workspace.tabs) { tab in Button { workspace.activeID = tab.id } label: { Label(tab.location.title, systemImage: workspace.activeID == tab.id ? "checkmark" : tab.location.symbol) } }
                 Divider(); Button("Reopen Closed Tab") { workspace.reopenClosedTab() }.disabled(workspace.closedTabs.isEmpty)
-            } label: { Image(systemName: "chevron.down").font(.system(size: 10)).frame(width: 30, height: 36) }
-                .buttonStyle(ExplorerIconStyle()).menuStyle(.borderlessButton).menuIndicator(.hidden).help("All tabs").padding(.trailing, 12).padding(.bottom, 2)
-        }.frame(height: ExplorerDesign.titleHeight).background(ExplorerDesign.chrome)
+            } label: { Image(systemName: "chevron.down").font(.system(size: 10)).frame(width: input.target, height: input.target) }
+                .buttonStyle(ExplorerIconStyle()).menuStyle(.borderlessButton).menuIndicator(.hidden).help("All tabs").padding(.trailing, 12).padding(.bottom, 4)
+        }.frame(height: input.touchFriendly ? 52 : 42).background(ExplorerDesign.chrome)
     }
 }
 struct WorkspaceTabItem: View {
@@ -95,7 +95,7 @@ struct WorkspaceTabItem: View {
     @ObservedObject private var input = InputPreferences.shared
     @State private var hovered = false
     private var active: Bool { workspace.activeID == tab.id }
-    private var height: CGFloat { input.touchFriendly ? 44 : titlebar ? 37 : 34 }
+    private var height: CGFloat { input.touchFriendly ? 44 : 34 }
     var body: some View {
         HStack(spacing: 8) {
             Button { workspace.activatePane(); workspace.activeID = tab.id } label: {

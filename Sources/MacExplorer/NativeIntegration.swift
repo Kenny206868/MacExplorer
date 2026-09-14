@@ -75,7 +75,6 @@ import ExplorerCore
         return image
     }
 }
-
 struct FileThumbnail: View {
     let entry: FileEntry
     var size: CGFloat = 20
@@ -87,7 +86,6 @@ struct FileThumbnail: View {
             .accessibilityHidden(true)
     }
 }
-
 /// Embedded OS Quick Look content; all application chrome remains SwiftUI.
 struct NativePreview: NSViewRepresentable {
     let url: URL
@@ -95,19 +93,19 @@ struct NativePreview: NSViewRepresentable {
     func updateNSView(_ view: QLPreviewView, context: Context) { if view.previewItem?.previewItemURL != url { view.previewItem = url as NSURL } }
     static func dismantleNSView(_ view: QLPreviewView, coordinator: ()) { view.close() }
 }
-
 struct WindowAccessor: NSViewRepresentable {
     let owner: ExplorerWorkspace
     final class View: NSView {
         weak var owner: ExplorerWorkspace?
+        let chrome = NativeWindowChrome()
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             guard let window, let owner else { return }
-            owner.window = window; window.title = "MacExplorer"; window.minSize = NSSize(width: 800, height: 500)
-            window.tabbingMode = .disallowed; AppRouter.shared.active = owner
+            owner.window = window; chrome.attach(to: window, owner: owner); window.minSize = NSSize(width: 800, height: 500)
+            window.tabbingMode = .disallowed; AppRouter.shared.active = owner.routedWorkspace
             if !AppRouter.shared.pending.isEmpty { let urls = AppRouter.shared.pending; AppRouter.shared.pending = []; DispatchQueue.main.async { owner.openURLs(urls) } }
         }
     }
     func makeNSView(context: Context) -> View { let view = View(); view.owner = owner; return view }
-    func updateNSView(_ view: View, context: Context) { view.owner = owner }
+    func updateNSView(_ view: View, context: Context) { view.owner = owner; if let window = view.window { view.chrome.attach(to: window, owner: owner) } }
 }
