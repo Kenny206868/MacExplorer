@@ -7,12 +7,14 @@ permissions:
   contents: read
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
   native:
     uses: ./.github/workflows/build.yml
     with:
       version: '0.1.0'
+  visual:
+    uses: ./.github/workflows/visual.yml
   repository:
     runs-on: ubuntu-latest
     steps:
