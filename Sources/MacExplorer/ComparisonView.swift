@@ -58,8 +58,9 @@ import ExplorerCore
     }
     private var options: some View {
         HStack(spacing: 16) {
-            Picker("Compare", selection: $model.mode) { ForEach(ComparisonMode.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
-                .pickerStyle(.segmented).frame(width: 212).disabled(model.running)
+            Text("Compare").fixedSize()
+            Picker("Comparison method", selection: $model.mode) { ForEach(ComparisonMode.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
+                .labelsHidden().pickerStyle(.segmented).frame(width: 212).disabled(model.running)
             Picker("Names", selection: $model.names) { ForEach(ComparisonNamePolicy.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
                 .frame(width: 188).disabled(model.running)
             Spacer(minLength: 0)
