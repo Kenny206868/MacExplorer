@@ -7,12 +7,13 @@ import ExplorerCore
 final class CommandPaletteSnapshotTests: XCTestCase {
     @MainActor func testNativeCommandPaletteStates() async throws {
         guard let path = ProcessInfo.processInfo.environment["MACEXPLORER_SNAPSHOT_DIR"] else { throw XCTSkip("Native visual CI only") }
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("CommandPalette-" + UUID().uuidString)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        let fixture = FileManager.default.temporaryDirectory.appendingPathComponent("CommandPalette-" + UUID().uuidString)
+        let root = fixture.appendingPathComponent("Documents")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let file = root.appendingPathComponent("Project proposal.txt"); try Data("fixture".utf8).write(to: file)
         let input = InputPreferences.shared, savedTouch = input.touchFriendly
         let store = PreferenceStore.shared, saved = store.value
-        defer { input.touchFriendly = savedTouch; store.value = saved; try? FileManager.default.removeItem(at: root) }
+        defer { input.touchFriendly = savedTouch; store.value = saved; try? FileManager.default.removeItem(at: fixture) }
         input.touchFriendly = false
         let workspace = ExplorerWorkspace(session: BrowserSession(id: UUID(), history: NavigationHistory(.folder(root)), options: FolderOptions(), query: "", allLocations: false, selection: []))
         workspace.current.stop(); workspace.current.entries = [try FileEntry(url: file)]

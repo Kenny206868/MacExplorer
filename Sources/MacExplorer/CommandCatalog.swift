@@ -10,7 +10,7 @@ enum ExplorerCommand: String, CaseIterable, Identifiable {
     case selectAll, invertSelection, clearSelection, selectMode
     case back, forward, up, home, computer, search, refresh, terminal, connect
     case details, icons, gallery, hidden, extensions, previewPane, detailsPane, compact, touch, gestures
-    case switchPane, copyOther, moveOther, swapPanes, equalPanes
+    case compareFolders, switchPane, copyOther, moveOther, swapPanes, equalPanes
     case reopenTab, undo, redo, operations, recovery, keyboard
     var id: String { rawValue }
     var spec: (title: String, category: String, symbol: String, shortcut: String, aliases: String) {
@@ -59,6 +59,7 @@ enum ExplorerCommand: String, CaseIterable, Identifiable {
         case .compact: return ("Toggle Compact View", "View", "line.3.horizontal.decrease", "", "density spacing")
         case .touch: return ("Toggle Touch-friendly Controls", "Input", "hand.tap", "", "large targets tablet")
         case .gestures: return ("Toggle Trackpad Gestures", "Input", "hand.draw", "", "swipe pinch zoom")
+        case .compareFolders: return ("Compare Pane Folders…", "Panes", "doc.text.magnifyingglass", "", "differences matching metadata compare directories")
         case .switchPane: return ("Switch File Pane", "Panes", "arrow.left.arrow.right", "Tab", "focus other panel")
         case .copyOther: return ("Copy to Other Pane", "Panes", "doc.on.doc", "⌥⌘C", "transfer destination")
         case .moveOther: return ("Move to Other Pane…", "Panes", "arrow.right.doc.on.clipboard", "⌥⌘M", "transfer confirm destination")
@@ -86,6 +87,7 @@ enum ExplorerCommand: String, CaseIterable, Identifiable {
         default: break
         }
         switch self {
+        case .compareFolders: return ComparisonContext.unavailable(workspace)
         case .paste: return FileClipboard.shared.contents.urls.isEmpty ? "No files on the clipboard" : nil
         case .back: return workspace.current.history.canGoBack ? nil : "No previous location"
         case .forward: return workspace.current.history.canGoForward ? nil : "No next location"
@@ -151,6 +153,7 @@ enum ExplorerCommand: String, CaseIterable, Identifiable {
         case .compact: w.preferences.value.compact.toggle()
         case .touch: InputPreferences.shared.touchFriendly.toggle()
         case .gestures: InputPreferences.shared.gesturesEnabled.toggle()
+        case .compareFolders: w.sheet = .compareFolders
         case .switchPane: if let p = w.paneController { p.focus(p.geometry.focused.other, files: true) }
         case .copyOther: w.paneController?.requestTransfer(from: w, move: false)
         case .moveOther: w.paneController?.requestTransfer(from: w, move: true)
@@ -207,6 +210,7 @@ enum ExplorerCommand: String, CaseIterable, Identifiable {
     func move(_ offset: Int) {
         guard !matches.isEmpty else { selection = nil; return }
         let index = selection.flatMap { matches.firstIndex(of: $0) } ?? 0
-        selection = matches[min(matches.count - 1, max(0, index + offset))]
+        let (next, overflow) = index.addingReportingOverflow(offset)
+        selection = matches[min(matches.count - 1, max(0, overflow ? (offset > 0 ? matches.count - 1 : 0) : next))]
     }
 }

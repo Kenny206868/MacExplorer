@@ -105,6 +105,7 @@ struct ExplorerCommands: Commands {
         Divider()
         Button("Next Tab") { target?.cycleTab(1) }.keyboardShortcut("]", modifiers: [.command, .shift]).disabled(target == nil)
         Button("Previous Tab") { target?.cycleTab(-1) }.keyboardShortcut("[", modifiers: [.command, .shift]).disabled(target == nil)
+        Button("Compare Pane Folders…") { target?.sheet = .compareFolders }.disabled(target.map { ComparisonContext.unavailable($0) != nil } ?? true)
         Button("Switch File Pane") { if let dual = target?.paneController { dual.focus(dual.geometry.focused.other, files: true) } }.disabled(target?.paneController == nil)
         Divider()
         Button("File Operations…") { target?.sheet = .operations }.keyboardShortcut("j").disabled(target == nil)

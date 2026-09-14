@@ -8,7 +8,7 @@ import math
 import pathlib
 import struct
 
-MANIFESTS = ('captures.json', 'archive-captures.json', 'design-captures.json', 'dual-captures.json', 'settings-captures.json', 'inline-captures.json', 'command-captures.json', 'window-captures.json')
+MANIFESTS = ('captures.json', 'archive-captures.json', 'design-captures.json', 'dual-captures.json', 'settings-captures.json', 'inline-captures.json', 'command-captures.json', 'comparison-captures.json', 'window-captures.json')
 CASES = {'extra-large-icons', 'large-icons', 'medium-icons', 'small-icons', 'list', 'details',
          'tiles', 'content', 'gallery', 'grouped-selection', 'panes-800', 'panes-1024', 'panes-1600',
          'empty', 'permission-denied', 'dialog-newFolder', 'dialog-newFile', 'dialog-rename',
@@ -17,6 +17,7 @@ CASES = {'extra-large-icons', 'large-icons', 'medium-icons', 'small-icons', 'lis
          'dual-secondary', 'dual-stacked', 'dual-narrow', 'dual-inspector', 'dual-touch',
          'touch-file-actions', 'keyboard-help', 'settings-appearance', 'settings-input', 'settings-integration',
          'settings-updates', 'inline-rename', 'commands', 'commands-search', 'commands-disabled', 'commands-empty',
+         'comparison-metadata', 'comparison-data', 'comparison-empty',
          'native-window', 'native-dual-window', 'native-narrow-window'}
 REQUIRED = {f'{theme}-{case}' for theme in ('light', 'dark') for case in CASES}
 
@@ -62,16 +63,17 @@ def validate(root: pathlib.Path) -> dict:
         checksums[name + '.png'] = hashlib.sha256(data).hexdigest()
         label = html.escape(name)
         cards.append(f'<article data-name="{label}"><h2>{label}</h2><a href="{label}.png"><img loading="lazy" src="{label}.png" alt="Native {label} capture" width="{width}" height="{height}"></a></article>')
-    page = '''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>MacExplorer native review</title><style>body{font:14px system-ui;margin:32px;background:#17191d;color:#eef0f4}header{max-width:940px;margin-bottom:30px}main{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(580px,100%),1fr));gap:24px}h2{font-size:14px}img{width:100%;height:auto;border:1px solid #454951;border-radius:10px}input{font:inherit;padding:12px;width:min(500px,85%);border-radius:8px;border:1px solid #596273;background:#252930;color:inherit}a{color:inherit}[hidden]{display:none}</style><header><h1>MacExplorer · native design review</h1><p>Complete native windows appear first, including system titlebar, toolbar and traffic lights. Production content captures cover independent browsers, settings, inline renaming, commands, touch and keyboard workflows. Geometry, palette, selection, bitmap and state checks supplement visual review; they do not certify physical input devices or every assistive-technology interaction.</p><input id="filter" type="search" aria-label="Filter captures" placeholder="Filter: native, dual, settings, touch, dark…"></header><main>'''
+    page = '''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>MacExplorer native review</title><style>body{font:14px system-ui;margin:32px;background:#17191d;color:#eef0f4}header{max-width:940px;margin-bottom:30px}main{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(580px,100%),1fr));gap:24px}h2{font-size:14px}img{width:100%;height:auto;border:1px solid #454951;border-radius:10px}input{font:inherit;padding:12px;width:min(500px,85%);border-radius:8px;border:1px solid #596273;background:#252930;color:inherit}a{color:inherit}[hidden]{display:none}</style><header><h1>MacExplorer · native design review</h1><p>Complete native windows appear first, including system titlebar, toolbar and traffic lights. Production views cover independent browsers, settings, inline renaming, commands and read-only comparison. Geometry, palette, selection, bitmap and state checks supplement visual review; they do not certify physical input devices or every assistive-technology interaction.</p><input id="filter" type="search" aria-label="Filter captures" placeholder="Filter: native, dual, comparison, commands, touch…"></header><main>'''
     script = '''<script>document.getElementById('filter').addEventListener('input',e=>{const q=e.target.value.toLowerCase();for(const card of document.querySelectorAll('article'))card.hidden=!card.dataset.name.includes(q)})</script>'''
     (root / 'index.html').write_text(page + ''.join(cards) + '</main>' + script + '</html>')
-    report = {'schemaVersion': 7, 'captures': len(captures), 'sha256': checksums,
+    report = {'schemaVersion': 8, 'captures': len(captures), 'sha256': checksums,
               'checks': ['coverage', 'PNG dimensions', 'nonblank rendering', 'opaque sRGB compositing',
                          'reference pane geometry', 'reference palette', 'selected-row palette',
                          'empty canvas palette', 'dual-pane containment and non-overlap', 'independent pane selection',
                          'responsive orientation intent', 'touch and keyboard action coverage', 'all settings pages',
                          'native inline filename editor', 'searchable command palette and native search focus',
-                         'complete titled windows', 'standard window buttons', 'native toolbar identity and customization']}
+                         'read-only directory comparison states', 'complete titled windows', 'standard window buttons',
+                         'native toolbar identity and customization']}
     (root / 'validation.json').write_text(json.dumps(report, indent=2) + '\n')
     return report
 
