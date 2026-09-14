@@ -129,7 +129,7 @@ public actor FileService {
         for var url in urls {
             try Task.checkCancellation()
             var values = URLResourceValues()
-            if let tags { values.tagNames = tags }
+            if let tags { try (url as NSURL).setResourceValue(tags, forKey: .tagNamesKey) }
             if let locked { values.isUserImmutable = locked }
             try url.setResourceValues(values)
             if let permissions { try FileManager.default.setAttributes([.posixPermissions: permissions & 0o777], ofItemAtPath: url.path) }
