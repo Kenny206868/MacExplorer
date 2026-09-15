@@ -5,7 +5,6 @@ public enum ExplorerError: LocalizedError {
     case message(String)
     public var errorDescription: String? { switch self { case .message(let value): return value } }
 }
-
 public struct FileEntry: Identifiable, Hashable, Sendable {
     public var id: URL { url }
     public let url: URL
@@ -27,26 +26,19 @@ public struct FileEntry: Identifiable, Hashable, Sendable {
     public var sizeText: String { isDirectory ? "—" : ByteCountFormatter.string(fromByteCount: size, countStyle: .file) }
     public var extensionName: String { url.pathExtension.lowercased() }
     public static let resourceKeys: Set<URLResourceKey> = [.nameKey, .isDirectoryKey, .isPackageKey, .isSymbolicLinkKey, .isHiddenKey, .isUserImmutableKey, .fileSizeKey, .contentModificationDateKey, .creationDateKey, .localizedTypeDescriptionKey, .tagNamesKey, .isUbiquitousItemKey, .ubiquitousItemDownloadingStatusKey]
-
     public init(url: URL) throws {
         self.url = url.standardizedFileURL
         let v = try url.resourceValues(forKeys: Self.resourceKeys)
         name = v.name ?? url.lastPathComponent
-        isDirectory = v.isDirectory ?? false
-        isPackage = v.isPackage ?? false
-        isSymbolicLink = v.isSymbolicLink ?? false
-        isHidden = v.isHidden ?? name.hasPrefix(".")
-        isLocked = v.isUserImmutable ?? false
-        size = Int64(v.fileSize ?? 0)
-        modified = v.contentModificationDate ?? .distantPast
-        created = v.creationDate ?? .distantPast
-        kind = v.localizedTypeDescription ?? (isDirectory ? "Folder" : "File")
-        tags = v.tagNames ?? []
+        isDirectory = v.isDirectory ?? false; isPackage = v.isPackage ?? false
+        isSymbolicLink = v.isSymbolicLink ?? false; isHidden = v.isHidden ?? name.hasPrefix(".")
+        isLocked = v.isUserImmutable ?? false; size = Int64(v.fileSize ?? 0)
+        modified = v.contentModificationDate ?? .distantPast; created = v.creationDate ?? .distantPast
+        kind = v.localizedTypeDescription ?? (isDirectory ? "Folder" : "File"); tags = v.tagNames ?? []
         isCloud = v.isUbiquitousItem ?? false
         isDownloaded = !isCloud || v.ubiquitousItemDownloadingStatus == .current || v.ubiquitousItemDownloadingStatus == .downloaded
     }
 }
-
 public enum ViewMode: String, CaseIterable, Codable, Sendable {
     case extraLarge = "Extra large icons", large = "Large icons", medium = "Medium icons", small = "Small icons", list = "List", details = "Details", tiles = "Tiles", content = "Content", gallery = "Gallery"
     public var iconSize: Double { switch self { case .extraLarge: return 128; case .large, .gallery: return 80; case .medium, .tiles: return 48; case .content: return 40; default: return 20 } }
@@ -54,7 +46,7 @@ public enum ViewMode: String, CaseIterable, Codable, Sendable {
 }
 public enum SortField: String, CaseIterable, Codable, Sendable { case name = "Name", modified = "Date modified", created = "Date created", kind = "Kind", size = "Size", tags = "Tags" }
 public enum GroupField: String, CaseIterable, Codable, Sendable { case none = "None", kind = "Kind", modified = "Date modified", tags = "Tags" }
-public struct FolderOptions: Codable, Sendable {
+public struct FolderOptions: Codable, Equatable, Sendable {
     public var view: ViewMode = .details
     public var sort: SortField = .name
     public var descending = false
@@ -62,7 +54,13 @@ public struct FolderOptions: Codable, Sendable {
     public var group: GroupField = .none
     public init() {}
     public func sorted(_ entries: [FileEntry]) -> [FileEntry] {
-        entries.sorted { a, b in
+        try! sorted(entries, checkingCancellation: {})
+    }
+    public func sorted(_ entries: [FileEntry], checkingCancellation: () throws -> Void) throws -> [FileEntry] {
+        try checkingCancellation()
+        var comparisons = 0
+        return try entries.sorted { a, b in
+            comparisons += 1; if comparisons & 511 == 0 { try checkingCancellation() }
             if foldersFirst && a.canBrowse != b.canBrowse { return a.canBrowse }
             let result: ComparisonResult
             switch sort {
@@ -78,16 +76,11 @@ public struct FolderOptions: Codable, Sendable {
         }
     }
 }
-
 public enum Location: Hashable, Codable, Sendable {
     case home, gallery, computer, network, trash, folder(URL), tag(String)
     public var title: String {
         switch self {
-        case .home: return "Home"
-        case .gallery: return "Gallery"
-        case .computer: return "This Mac"
-        case .network: return "Network"
-        case .trash: return "Trash"
+        case .home: return "Home"; case .gallery: return "Gallery"; case .computer: return "This Mac"; case .network: return "Network"; case .trash: return "Trash"
         case .folder(let url): return url.path == "/" ? "Macintosh HD" : url.lastPathComponent
         case .tag(let value): return value
         }
@@ -96,14 +89,9 @@ public enum Location: Hashable, Codable, Sendable {
         switch self { case .home: return "house"; case .gallery: return "photo.on.rectangle"; case .computer: return "desktopcomputer"; case .network: return "network"; case .trash: return "trash"; case .folder: return "folder"; case .tag: return "tag" }
     }
     public var directory: URL? {
-        switch self {
-        case .folder(let url): return url
-        case .gallery: return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Pictures")
-        default: return nil
-        }
+        switch self { case .folder(let url): return url; case .gallery: return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Pictures"); default: return nil }
     }
 }
-
 public struct NavigationHistory: Codable, Sendable {
     public private(set) var locations: [Location]
     public private(set) var index: Int
@@ -114,40 +102,31 @@ public struct NavigationHistory: Codable, Sendable {
     public mutating func navigate(_ location: Location) {
         guard location != current else { return }
         locations = Array(locations.prefix(index + 1)); locations.append(location)
-        if locations.count > 128 { locations.removeFirst() }
-        index = locations.count - 1
+        if locations.count > 128 { locations.removeFirst() }; index = locations.count - 1
     }
     public mutating func back() { if canGoBack { index -= 1 } }
     public mutating func forward() { if canGoForward { index += 1 } }
 }
-
 public struct Bookmark: Codable, Identifiable, Hashable, Sendable {
     public let id: UUID
     public var path: String
     public var data: Data?
-    public init(_ url: URL) {
-        id = UUID(); path = url.path
-        data = try? url.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil)
-    }
+    public init(_ url: URL) { id = UUID(); path = url.path; data = try? url.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil) }
     public var url: URL {
         if let data { var stale = false; if let url = try? URL(resolvingBookmarkData: data, options: [.withoutUI, .withoutMounting], relativeTo: nil, bookmarkDataIsStale: &stale) { return url } }
         return URL(fileURLWithPath: path)
     }
 }
-
 public enum FileNames {
     public static func validate(_ name: String) throws {
         guard !name.isEmpty, name != ".", name != "..", !name.contains("/"), !name.contains(":"), !name.contains("\0"), name.utf8.count <= 255 else {
             throw ExplorerError.message("Use a nonempty name of at most 255 UTF-8 bytes, without slash, colon, or NUL.")
         }
     }
-    public static func exists(_ url: URL) -> Bool {
-        FileManager.default.fileExists(atPath: url.path) || (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) != nil
-    }
+    public static func exists(_ url: URL) -> Bool { FileManager.default.fileExists(atPath: url.path) || (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) != nil }
     public static func unique(_ url: URL) -> URL {
         if !exists(url) { return url }
-        let ext = url.pathExtension
-        let base = ext.isEmpty ? url.lastPathComponent : url.deletingPathExtension().lastPathComponent
+        let ext = url.pathExtension, base = url.pathExtension.isEmpty ? url.lastPathComponent : url.deletingPathExtension().lastPathComponent
         var index = 2
         while true {
             let candidate = url.deletingLastPathComponent().appendingPathComponent("\(base) (\(index))" + (ext.isEmpty ? "" : ".\(ext)"))
@@ -155,8 +134,7 @@ public enum FileNames {
         }
     }
     public static func isDescendant(_ child: URL, of parent: URL) -> Bool {
-        let a = child.standardizedFileURL.resolvingSymlinksInPath().pathComponents
-        let b = parent.standardizedFileURL.resolvingSymlinksInPath().pathComponents
+        let a = child.standardizedFileURL.resolvingSymlinksInPath().pathComponents, b = parent.standardizedFileURL.resolvingSymlinksInPath().pathComponents
         return a.count >= b.count && Array(a.prefix(b.count)) == b
     }
     public static func independentRoots(_ urls: [URL]) -> [URL] {
