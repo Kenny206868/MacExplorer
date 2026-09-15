@@ -6,13 +6,20 @@ extension FileOperationEngine {
         await acquire(); defer { release() }
         var result = FileJobResult(title: job.title), sticky: CollisionChoice?
         let manager = FileManager.default
-        do { try control.checkpoint(); try beginJournal(job.title) }
+        let sources: [URL]
+        do {
+            try control.checkpoint()
+            sources = try await FileReadExecutor.metadata.run { cancellation in
+                try OperationSourcePlan.roots(job.sources) { try cancellation.check(); try control.checkpoint() }
+            }
+            try control.checkpoint(); try beginJournal(job.title)
+        }
         catch is CancellationError { result.cancelled = true; return result }
         catch { result.errors = [error.localizedDescription]; return result }
-        let reporter = TransferProgressReporter(total: job.sources.count, observer: progress)
+        let reporter = TransferProgressReporter(total: sources.count, observer: progress)
         if job.kind == .copy {
             var total: Int64 = 0, completeEstimate = true
-            for source in job.sources {
+            for source in sources {
                 reporter.phase(.calculating, name: source.lastPathComponent)
                 do {
                     let size = try TransferInventory.logicalBytes(source, control: control)
@@ -39,12 +46,12 @@ extension FileOperationEngine {
                     if job.kind == .createFolder { try manager.createDirectory(at: payload, withIntermediateDirectories: false) }
                     else { try Data().write(to: payload, options: .withoutOverwriting) }
                 case .compress:
-                    let identities = try job.sources.map { ($0, try FileFingerprint($0)) }
-                    payload = try ArchiveService.compress(job.sources, to: container, control: control)
+                    let identities = try sources.map { ($0, try FileFingerprint($0)) }
+                    payload = try ArchiveService.compress(sources, to: container, control: control)
                     guard identities.allSatisfy({ $0.1.matches($0.0) }) else { throw ExplorerError.message("A source changed while creating the archive.") }
                     target = FileNames.unique(parent.appendingPathComponent(payload.lastPathComponent))
                 default:
-                    guard let source = job.sources.first else { throw ExplorerError.message("Select an archive.") }
+                    guard let source = sources.first else { throw ExplorerError.message("Select an archive.") }
                     payload = try ArchiveService.extract(source, to: container, control: control, options: job.archiveOptions)
                     target = FileNames.unique(parent.appendingPathComponent(payload.lastPathComponent))
                 }
@@ -58,7 +65,7 @@ extension FileOperationEngine {
             let final = FileProgress(completed: result.outputs.isEmpty ? 0 : 1, total: 1, name: result.outputs.first?.lastPathComponent ?? job.title, phase: result.cancelled ? .cancelled : .finished)
             result.finalProgress = final; progress(final); return result
         }
-        for source in job.sources {
+        for source in sources {
             reporter.begin(name: source.lastPathComponent, copying: job.kind == .copy)
             var succeeded = false
             defer { reporter.end(success: succeeded) }

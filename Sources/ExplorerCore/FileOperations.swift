@@ -24,8 +24,10 @@ public struct FileJob: Sendable, Identifiable {
     public let destination: URL?
     public let names: [String: String]
     public let archiveOptions: ArchiveReadOptions?
+    /// Capture intent only. Filesystem-backed root planning runs in the engine's
+    /// bounded read lane, never while an input handler constructs a job.
     public init(_ kind: FileJobKind, sources: [URL] = [], destination: URL? = nil, names: [String: String] = [:], archiveOptions: ArchiveReadOptions? = nil) {
-        id = UUID(); self.kind = kind; self.sources = FileNames.independentRoots(sources); self.destination = destination; self.names = names; self.archiveOptions = archiveOptions
+        id = UUID(); self.kind = kind; self.sources = sources; self.destination = destination; self.names = names; self.archiveOptions = archiveOptions
     }
     public var title: String { kind.rawValue.capitalized }
 }
@@ -70,8 +72,6 @@ public struct UndoStep: Codable, Sendable {
     public let source: URL
     public let destination: URL?
     public let expected: FileFingerprint
-    /// Our inverse child moves change container mtimes; require identity and
-    /// emptiness instead. Optional for compatibility with older receipts.
     public let emptyDirectory: Bool?
     public init(_ kind: Kind, source: URL, destination: URL? = nil, emptyDirectory: Bool = false) throws {
         self.kind = kind; self.source = source; self.destination = destination
@@ -178,8 +178,6 @@ public actor FileOperationEngine {
                 guard replace, let existing, existing.matches(target) else { throw ExplorerError.message("The destination changed while copying. No existing file was overwritten.") }
                 try guardSource(target); try moveDurably(target, to: backup); displaced = true
             }
-            // Cooperative cancellation is deferred, but each exclusive rename
-            // still has a durable intent and recoverable process-crash boundary.
             try moveDurably(stage, to: target)
             var undo: [UndoStep]
             if crossVolume {

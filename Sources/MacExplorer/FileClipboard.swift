@@ -28,8 +28,6 @@ import ExplorerCore
         let urls = objects.map { $0 as URL }
         return (urls, readGeneration() == cutChangeCount && !cutURLs.isEmpty && Set(urls.map { $0.standardizedFileURL.path }) == cutPaths)
     }
-    /// Pure O(1) membership; visual expiry is sampled at 250 ms while a cut is
-    /// active. Paste/move commands perform immediate generation validation.
     func isCut(_ url: URL) -> Bool { cutPaths.contains(url.standardizedFileURL.path) }
     func reserveCut() -> CutTicket? {
         guard !reserved, contents.isCut else { return nil }; reserved = true
@@ -38,8 +36,8 @@ import ExplorerCore
     func finish(_ ticket: CutTicket, moved: [URL]) {
         guard ticket.generation == cutChangeCount, readGeneration() == ticket.generation else { refresh(); return }
         reserved = false
-        let roots = moved.map { $0.standardizedFileURL.pathComponents }
-        let remaining = ticket.sources.filter { url in !roots.contains { url.standardizedFileURL.pathComponents.starts(with: $0) } }
+        let roots = FilePathCoverage(roots: moved)
+        let remaining = ticket.sources.filter { !roots.contains($0) }
         guard remaining.count != ticket.sources.count else { revision += 1; return }
         board.clearContents()
         let written = remaining.isEmpty || board.writeObjects(remaining as [NSURL])
