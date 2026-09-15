@@ -80,7 +80,7 @@ public struct FolderOptions: Codable, Sendable {
 }
 
 public enum Location: Hashable, Codable, Sendable {
-    case home, gallery, computer, network, trash, folder(URL), tag(String)
+    case home, gallery, computer, network, trash, folder(URL), tag(String), archive(URL, folder: String)
     public var title: String {
         switch self {
         case .home: return "Home"
@@ -89,11 +89,12 @@ public enum Location: Hashable, Codable, Sendable {
         case .network: return "Network"
         case .trash: return "Trash"
         case .folder(let url): return url.path == "/" ? "Macintosh HD" : url.lastPathComponent
+        case .archive(let source, let folder): return folder.isEmpty ? source.lastPathComponent : folder.split(separator: "/").last.map(String.init) ?? source.lastPathComponent
         case .tag(let value): return value
         }
     }
     public var symbol: String {
-        switch self { case .home: return "house"; case .gallery: return "photo.on.rectangle"; case .computer: return "desktopcomputer"; case .network: return "network"; case .trash: return "trash"; case .folder: return "folder"; case .tag: return "tag" }
+        switch self { case .home: return "house"; case .gallery: return "photo.on.rectangle"; case .computer: return "desktopcomputer"; case .network: return "network"; case .trash: return "trash"; case .folder: return "folder"; case .archive: return "doc.zipper"; case .tag: return "tag" }
     }
     public var directory: URL? {
         switch self {

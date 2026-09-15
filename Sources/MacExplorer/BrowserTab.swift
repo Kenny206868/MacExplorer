@@ -11,6 +11,9 @@ import ExplorerCore
     @Published var query = "" { didSet { if query != oldValue { scheduleSearch() } } }
     @Published var allLocations = false { didSet { scheduleSearch() } }
     @Published var loading = false
+    @Published var archiveRevision = 0
+    @Published var archiveItemCount = 0
+    @Published var archiveSelectionCount = 0
     @Published var error: String?
     @Published var warnings: [String] = []
     @Published var truncated = false
@@ -48,8 +51,7 @@ import ExplorerCore
         let value = FileNavigationSnapshot(entries: entries)
         cachedNavigation = value; navigationBuilds += 1; return value
     }
-    /// Avoid repeatedly publishing unchanged focus/selection at boundaries and
-    /// during high-frequency marquee input. No filesystem access occurs here.
+    /// No filesystem access or redundant publication in high-frequency input.
     func applySelection(_ value: ExplorerSelection<URL>) {
         if selection != value.selected { selection = value.selected }
         selectionAnchor = value.anchor
@@ -66,7 +68,6 @@ import ExplorerCore
         set { selection = newValue.selected; selectionAnchor = newValue.anchor; focusedURL = newValue.focus }
     }
     var displayEntries: [FileEntry] { presentation.ordered }
-    /// The keyboard and Details rendering consume the same expanded rows.
     var navigableEntries: [FileEntry] { navigation.entries }
     func toggleGroup(_ title: String) {
         guard !title.isEmpty, let group = presentation.groups.first(where: { $0.title == title }) else { return }
@@ -99,10 +100,23 @@ import ExplorerCore
     }
     func back() { if history.canGoBack { stop(); history.back(); query = ""; resetSelection(); options = PreferenceStore.shared.folderOptions(location); refresh() } }
     func forward() { if history.canGoForward { stop(); history.forward(); query = ""; resetSelection(); options = PreferenceStore.shared.folderOptions(location); refresh() } }
-    func up() { if let directory = location.directory, directory.path != "/" { navigate(.folder(directory.deletingLastPathComponent())) } else { navigate(.computer) } }
-    func scheduleSearch() { work?.cancel(); work = Task { try? await Task.sleep(for: .milliseconds(260)); guard !Task.isCancelled else { return }; refresh() } }
+    func up() {
+        if case .archive(let source, let folder) = location {
+            navigate(folder.isEmpty ? .folder(source.deletingLastPathComponent()) : .archive(source, folder: folder.split(separator: "/").dropLast().joined(separator: "/")))
+        } else if let directory = location.directory, directory.path != "/" { navigate(.folder(directory.deletingLastPathComponent())) }
+        else { navigate(.computer) }
+    }
+    func scheduleSearch() {
+        guard !location.isArchive else { return }
+        work?.cancel(); work = Task { try? await Task.sleep(for: .milliseconds(260)); guard !Task.isCancelled else { return }; refresh() }
+    }
     func refresh() {
         work?.cancel(); spotlight.stop(); generation += 1
+        if location.isArchive {
+            watcher.stop(); entries = []; selection = []; loading = false; error = nil; warnings = []
+            archiveRevision &+= 1; return
+        }
+        archiveItemCount = 0; archiveSelectionCount = 0
         let token = generation, location = location, expression = SearchExpression(query)
         let p = PreferenceStore.shared.value
         let root = location.directory ?? FileManager.default.homeDirectoryForCurrentUser
@@ -151,7 +165,7 @@ import ExplorerCore
                             catch { combined.warnings.append("\(trash.path): \(error.localizedDescription)") }
                         }
                         snapshot = combined
-                    case .computer, .network, .tag: snapshot = DirectorySnapshot()
+                    case .computer, .network, .tag, .archive: snapshot = DirectorySnapshot()
                     }
                 }
                 guard token == generation, !Task.isCancelled else { return }

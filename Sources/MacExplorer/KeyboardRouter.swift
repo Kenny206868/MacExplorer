@@ -45,6 +45,25 @@ extension Notification.Name { static let explorerNewWindow = Notification.Name("
             default: if text == "d" { workspace.addressFocused = true; return nil }; return event
             }
         }
+        if workspace.current.location.isArchive {
+            if event.keyCode == 120 && !command && !control && !option { NotificationCenter.default.post(name: .archiveRenameRequested, object: workspace.current.id); return nil }
+            if event.keyCode == 96 && !command && !control && !option { workspace.current.refresh(); return nil }
+            if event.keyCode == 51 && !command && !control && !option { workspace.current.up(); return nil }
+            if control && !command {
+                switch text {
+                case "f": workspace.searchFocused = true; return nil
+                case "l": workspace.addressFocused = true; return nil
+                case "t": if shift { workspace.reopenClosedTab() } else { workspace.newTab() }; return nil
+                case "w": workspace.closeTab(workspace.activeID); return nil
+                case "z": workspace.operations.undo(redo: shift); return nil
+                case "y": workspace.operations.undo(redo: true); return nil
+                default: break
+                }
+            }
+            // The native archive Table owns selection, arrows, type-ahead and
+            // Delete; never route its members to physical FileEntry commands.
+            return event
+        }
         if control && !command {
             if [123, 124, 125, 126, 115, 119].contains(event.keyCode) {
                 guard workspace.fileSurfaceFocused else { return event }; workspace.keyboardMove(event.keyCode, shift: shift, control: true); return nil
