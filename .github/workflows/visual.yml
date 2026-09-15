@@ -31,25 +31,20 @@ jobs:
           swift test --filter MacExplorerUITests 2>&1 | tee artifacts/native-views/test.log
       - name: Validate coverage, dimensions, and render content
         run: python3 scripts/validate-snapshots.py artifacts/native-views
-      - name: Measure optimized native input and scrolling
+      - name: Test optimized native input and scrolling
+        id: optimized
         if: matrix.os == 'macos-26'
         env:
           MACEXPLORER_SNAPSHOT_DIR: ${{ github.workspace }}/artifacts/native-views/optimized-performance
+        run: python3 scripts/measure-native-performance.py
+      - name: Validate optimized performance provenance and budgets
+        if: matrix.os == 'macos-26' && steps.optimized.outcome == 'success'
+        env:
+          PERFORMANCE_DIR: ${{ github.workspace }}/artifacts/native-views/optimized-performance
         run: |
           set -o pipefail
-          mkdir -p "$MACEXPLORER_SNAPSHOT_DIR"
-          git rev-parse HEAD > "$MACEXPLORER_SNAPSHOT_DIR/COMMIT.txt"
-          swift test --configuration release -Xswiftc -DMACEXPLORER_PERFORMANCE_DIAGNOSTICS --filter LargeDirectoryScrollTests 2>&1 | tee "$MACEXPLORER_SNAPSHOT_DIR/test.log"
-          python3 - "$MACEXPLORER_SNAPSHOT_DIR" <<'PY'
-          import json, pathlib, sys
-          root = pathlib.Path(sys.argv[1])
-          report = json.loads((root / 'large-directory-performance.json').read_text())
-          assert report['buildConfiguration'] == 'release-instrumented', report
-          assert report['entries'] == 2000 and report['continuousScrollLayout']['samples'] == 120, report
-          assert 0 < report['selectionBodyEvaluations'] < 240, report
-          assert 0 < report['maximumLiveRowAnchors'] < 500, report
-          print(json.dumps(report, indent=2))
-          PY
+          python3 -m unittest discover -s scripts -p 'test_performance_validation.py' -v
+          python3 scripts/validate-performance.py "$PERFORMANCE_DIR" --commit "$GITHUB_SHA" 2>&1 | tee "$PERFORMANCE_DIR/validation.log"
       - name: Upload native PNGs, timing evidence, test log, and offline review gallery
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
