@@ -12,12 +12,17 @@ import ExplorerCore
     private weak var installedWindow: NSWindow?
     private var toolbar: NSToolbar?
     private var settingsObservation: AnyCancellable?
+    private var inputObservation: AnyCancellable?
+    let workspaceModel = WorkspaceChromeModel()
+    private var workspaceWidth: NSLayoutConstraint?
+    private var workspaceHeight: NSLayoutConstraint?
     private var windowObservers: [NSObjectProtocol] = []
     private var lastAvailability: [Bool]?
     private(set) var chromeMutationCount = 0
     private(set) var validationPasses = 0
     func attach(to window: NSWindow, owner: ExplorerWorkspace) {
         self.owner = owner
+        workspaceModel.update(owner: owner, width: window.frame.width)
         if installedWindow !== window {
             windowObservers.forEach(NotificationCenter.default.removeObserver); windowObservers = []
             installedWindow = window; lastAvailability = nil
@@ -25,7 +30,10 @@ import ExplorerCore
                 // Published emits before assignment; read the committed settings on the next UI turn.
                 DispatchQueue.main.async { [weak self] in self?.refresh() }
             }
-            for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification, NSWindow.didBecomeMainNotification] {
+            inputObservation = InputPreferences.shared.objectWillChange.sink { [weak self] _ in
+                DispatchQueue.main.async { [weak self] in self?.refresh() }
+            }
+            for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification, NSWindow.didBecomeMainNotification, NSWindow.didResizeNotification] {
                 windowObservers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.refresh() } })
             }
             // autosavesConfiguration=false disables disk persistence, not AppKit's
@@ -36,7 +44,9 @@ import ExplorerCore
             let toolbar = NSToolbar(identifier: identifier)
             toolbar.delegate = self; toolbar.allowsUserCustomization = true
             toolbar.autosavesConfiguration = persistsConfiguration; toolbar.displayMode = .iconOnly
+            toolbar.centeredItemIdentifiers = [.init("workspace")]
             self.toolbar = toolbar; window.toolbar = toolbar
+            migrateLegacyDefault(toolbar)
             window.toolbarStyle = CommanderPreferences.shared.compactTitlebar ? .unifiedCompact : .unified; window.titleVisibility = .visible
             window.titlebarAppearsTransparent = false; window.titlebarSeparatorStyle = .automatic
             window.isMovableByWindowBackground = false
@@ -46,6 +56,10 @@ import ExplorerCore
     deinit { windowObservers.forEach(NotificationCenter.default.removeObserver) }
     func refresh() {
         guard let root = owner, let window = installedWindow else { return }
+        workspaceModel.update(owner: root, width: window.frame.width)
+        let layout = workspaceModel.state.layout
+        if workspaceWidth?.constant != layout.titlebarWidth { workspaceWidth?.constant = layout.titlebarWidth }
+        if workspaceHeight?.constant != layout.titlebarHeight { workspaceHeight?.constant = layout.titlebarHeight }
         let workspace = root.routedWorkspace, location = workspace.current.location
         let title = location.title
         let style: NSWindow.ToolbarStyle = CommanderPreferences.shared.compactTitlebar ? .unifiedCompact : .unified
@@ -63,24 +77,46 @@ import ExplorerCore
         let available = WindowChromeAction.allCases.map { $0.enabled(for: root) }
         if lastAvailability != available { lastAvailability = available; toolbar?.validateVisibleItems(); validationPasses += 1 }
     }
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+    static var legacyDefaultItems: [NSToolbarItem.Identifier] {
         [.init("back"), .init("forward"), .flexibleSpace, .init("new"), .init("view"), .init("dual"), .init("terminal"), .init("power"), .init("inspector"), .init("more")]
+    }
+    /// Upgrade only the exact previously shipped default. Never reset an
+    /// owner's custom toolbar; Workspace Navigation is available in Customize.
+    func migrateLegacyDefault(_ toolbar: NSToolbar) {
+        guard toolbar.items.map(\.itemIdentifier) == Self.legacyDefaultItems else { return }
+        toolbar.insertItem(withItemIdentifier: .init("workspace"), at: 3)
+        toolbar.insertItem(withItemIdentifier: .flexibleSpace, at: 4)
+        if let index = toolbar.items.firstIndex(where: { $0.itemIdentifier.rawValue == "dual" }) { toolbar.removeItem(at: index) }
+    }
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [.init("back"), .init("forward"), .flexibleSpace, .init("workspace"), .flexibleSpace, .init("new"), .init("view"), .init("terminal"), .init("power"), .init("inspector"), .init("more")]
     }
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { WindowChromeAction.allCases.map { .init($0.rawValue) } + [.flexibleSpace, .space] }
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier identifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
         guard let action = WindowChromeAction(rawValue: identifier.rawValue) else { return nil }
         lastAvailability = nil
         let item: NSToolbarItem
-        if action.isMenu { let menuItem = NSMenuToolbarItem(itemIdentifier: identifier); menuItem.menu = menu(action); item = menuItem }
+        if action == .workspace {
+            // All app-created controls remain SwiftUI; AppKit only installs the
+            // view in the native customizable toolbar and constrains its size.
+            let host = NSHostingView(rootView: WorkspaceTitlebarControls(model: workspaceModel))
+            host.translatesAutoresizingMaskIntoConstraints = false
+            host.setAccessibilityIdentifier("explorer.titlebarWorkspaceHost")
+            let width = host.widthAnchor.constraint(equalToConstant: workspaceModel.state.layout.titlebarWidth)
+            let height = host.heightAnchor.constraint(equalToConstant: workspaceModel.state.layout.titlebarHeight)
+            NSLayoutConstraint.activate([width, height]); workspaceWidth = width; workspaceHeight = height
+            item = NSToolbarItem(itemIdentifier: identifier); item.view = host
+        }
+        else if action.isMenu { let menuItem = NSMenuToolbarItem(itemIdentifier: identifier); menuItem.menu = menu(action); item = menuItem }
         else { item = NSToolbarItem(itemIdentifier: identifier); item.target = self; item.action = #selector(invokeToolbar(_:)) }
         item.label = action.title; item.paletteLabel = action.title; item.toolTip = action.title
         item.image = NSImage(systemSymbolName: action.symbol, accessibilityDescription: action.title); item.image?.isTemplate = true
-        item.visibilityPriority = [.dual, .terminal, .power].contains(action) ? .high : .standard
+        item.visibilityPriority = [.workspace, .dual, .terminal, .power].contains(action) ? .high : .standard
         if action == .dual { item.toolTip = "Toggle dual panes · ⇧⌘D" }
         item.isBordered = false; item.isNavigational = action == .back || action == .forward || action == .up
         let overflow = NSMenuItem(title: action.title, action: #selector(invokeMenu(_:)), keyEquivalent: "")
         overflow.target = self; overflow.representedObject = action.rawValue
-        if action.isMenu { overflow.submenu = menu(action) }; item.menuFormRepresentation = overflow
+        if action.isMenu || action == .workspace { overflow.submenu = menu(action) }; item.menuFormRepresentation = overflow
         return item
     }
     func validateToolbarItem(_ item: NSToolbarItem) -> Bool { WindowChromeAction(rawValue: item.itemIdentifier.rawValue)?.enabled(for: owner) ?? false }
@@ -88,6 +124,7 @@ import ExplorerCore
         guard let key = item.representedObject as? String else { return true }
         if let action = WindowChromeAction(rawValue: key) { return action.enabled(for: owner) }
         guard let workspace = WorkspaceCommandScope.target(owner) else { return false }
+        if key.hasPrefix("layout:"), let command = WorkspaceLayoutAction(rawValue: String(key.dropFirst(7))) { return command.enabled(owner) }
         if key.hasPrefix("commander:"), let command = CommanderAction(rawValue: String(key.dropFirst(10))) { return command.enabled(in: workspace) }
         if key.hasPrefix("power:") { return true }
         return !workspace.current.location.isArchive
@@ -96,6 +133,7 @@ import ExplorerCore
     @objc private func invokeMenu(_ item: NSMenuItem) {
         guard let key = item.representedObject as? String else { return }
         if let action = WindowChromeAction(rawValue: key) { action.perform(on: owner); return }
+        if key.hasPrefix("layout:"), let action = WorkspaceLayoutAction(rawValue: String(key.dropFirst(7))) { action.perform(owner); return }
         WorkspaceCommandScope.perform(on: owner) { workspace in
             if key.hasPrefix("commander:"), let command = CommanderAction(rawValue: String(key.dropFirst(10))) { command.perform(in: workspace); return }
             let settings = CommanderPreferences.shared
@@ -139,7 +177,10 @@ import ExplorerCore
             item.target = self; item.representedObject = key; result.addItem(item)
         }
         func command(_ action: WindowChromeAction) { add(action.title, action.rawValue) }
-        if action == .power {
+        if action == .workspace {
+            for action in WorkspaceLayoutAction.allCases { add(action.title, "layout:" + action.rawValue) }
+        }
+        else if action == .power {
             add("Enable Commander Workspace", "power:enable")
             add("Show Commander Command Bar", "power:bar"); add("Classic F3–F8 File Commands", "power:keys")
             result.addItem(.separator())
@@ -168,7 +209,7 @@ import ExplorerCore
 enum WindowChromeAction: String, CaseIterable {
     case back, forward, up, refresh, new, newFolder, newFile, cut, copy, paste, trash, rename
     case view, details, icons, dual, inspector, preview, share, operations, properties, keyboard, more, commands
-    case hidden, extensions, checkboxes, compact, recovery, terminal, power
+    case hidden, extensions, checkboxes, compact, recovery, terminal, power, workspace
     var title: String {
         switch self {
         case .back: return "Back"; case .forward: return "Forward"; case .up: return "Enclosing Folder"; case .refresh: return "Refresh"
@@ -179,6 +220,7 @@ enum WindowChromeAction: String, CaseIterable {
         case .operations: return "File Operations…"; case .properties: return "Properties…"; case .keyboard: return "Keyboard and Gestures…"; case .more: return "More Actions"
         case .recovery: return "Recovery & History…"; case .terminal: return "Open Location in Terminal (⌥⌘↩)"
         case .power: return "Power Tools"
+        case .workspace: return "Workspace Navigation"
         case .commands: return "Command Palette…"; case .hidden: return "Hidden Items"; case .extensions: return "File Name Extensions"; case .checkboxes: return "Item Checkboxes"; case .compact: return "Compact Rows"
         }
     }
@@ -192,6 +234,7 @@ enum WindowChromeAction: String, CaseIterable {
         case .operations: return "arrow.up.arrow.down.circle"; case .properties: return "info.circle"; case .keyboard: return "keyboard"; case .more: return "ellipsis.circle"
         case .recovery: return "clock.arrow.circlepath"; case .terminal: return "terminal"
         case .power: return "command.square"
+        case .workspace: return "rectangle.split.2x1"
         case .commands: return "command"; case .hidden: return "eye.slash"; case .extensions: return "doc.text"; case .checkboxes: return "checkmark.square"; case .compact: return "line.3.horizontal.decrease"
         }
     }
@@ -222,7 +265,7 @@ enum WindowChromeAction: String, CaseIterable {
             case .keyboard: w.sheet = .keyboardHelp; case .commands: w.sheet = .commandPalette
             case .share: if let view = w.window?.contentView { NSSharingServicePicker(items: w.selectedURLs).show(relativeTo: view.bounds, of: view, preferredEdge: .minY) }
             case .hidden: w.preferences.value.showHidden.toggle(); case .extensions: w.preferences.value.showExtensions.toggle(); case .checkboxes: w.preferences.value.checkboxes.toggle(); case .compact: w.preferences.value.compact.toggle()
-            case .view, .more, .power: break
+            case .view, .more, .power, .workspace: break
             }
         }
     }

@@ -16,12 +16,12 @@ struct ExplorerStatusBar: View {
     @State private var volume: StatusVolume?
     @State private var showSelection = false
     @State private var showVolume = false
-    private var height: CGFloat { input.touchFriendly ? 44 : compact ? 32 : 36 }
+    private var height: CGFloat { input.touchFriendly ? 44 : compact ? CGFloat(WorkspaceChromeLayout(width: 0).paneStatusHeight) : 36 }
     private var storageURL: URL? { tab.location.directory ?? tab.location.archiveSource?.deletingLastPathComponent() }
     private var selectedCount: Int { tab.location.isArchive ? tab.archiveSelectionCount : tab.selectionStatistics.count }
     private var totalCount: Int { tab.location.isArchive ? tab.archiveItemCount : tab.entries.count }
     private var summaryText: String {
-        selectedCount > 0 ? "\(selectedCount) of \(totalCount) selected" : "\(totalCount) " + (tab.query.isEmpty ? "items" : "matches")
+        selectedCount > 0 ? "\(selectedCount) of \(totalCount) selected" : "\(totalCount) " + (tab.query.isEmpty ? (totalCount == 1 ? "item" : "items") : (totalCount == 1 ? "match" : "matches"))
     }
     var body: some View {
         GeometryReader { geometry in
@@ -88,17 +88,26 @@ struct ExplorerStatusBar: View {
     }
 }
 struct FileActivityButton: View {
+    var compact = false
     @ObservedObject private var center = OperationCenter.shared
     @State private var presented = false
     var body: some View {
         Button { presented.toggle() } label: {
-            if let job = center.jobs.first(where: { !$0.finished }) { StatusOperationBadge(job: job) }
-            else { Label(center.jobs.contains(where: { !$0.errors.isEmpty }) ? "Review operations" : "Activity", systemImage: center.jobs.contains(where: { !$0.errors.isEmpty }) ? "exclamationmark.circle" : "arrow.up.arrow.down.circle") }
-        }.buttonStyle(.plain).font(.system(size: 11)).help("View transfer progress without leaving this folder")
+            if let job = center.jobs.first(where: { !$0.finished }) { StatusOperationBadge(compact: compact, job: job) }
+            else { Label(center.jobs.contains(where: { !$0.errors.isEmpty }) ? "Review operations" : "Activity", systemImage: center.jobs.contains(where: { !$0.errors.isEmpty }) ? "exclamationmark.circle" : "arrow.up.arrow.down.circle").labelStyle(ActivityLabelStyle(compact: compact)) }
+        }.buttonStyle(.plain).font(.system(size: 11)).frame(minWidth: compact ? 28 : 0, minHeight: InputPreferences.shared.touchFriendly ? 44 : 28)
+            .accessibilityLabel("File activity").help("View transfer progress without leaving this folder")
             .popover(isPresented: $presented, arrowEdge: .bottom) { FileActivityPopover() }
     }
 }
+private struct ActivityLabelStyle: LabelStyle {
+    let compact: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 5) { configuration.icon; if !compact { configuration.title } }
+    }
+}
 private struct StatusOperationBadge: View {
+    var compact = false
     @ObservedObject var job: OperationRow
     private var fraction: Double? {
         guard let total = job.progress.totalBytes, total > 0 else { return nil }
@@ -107,8 +116,8 @@ private struct StatusOperationBadge: View {
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: job.paused ? "pause.circle" : "arrow.up.arrow.down.circle").foregroundStyle(Color.accentColor)
-            Text(job.paused ? "Paused" : job.progress.phase.rawValue).lineLimit(1)
-            if let fraction {
+            if !compact { Text(job.paused ? "Paused" : job.progress.phase.rawValue).lineLimit(1) }
+            if let fraction, !compact {
                 ProgressView(value: fraction).progressViewStyle(.linear).frame(width: 36).accessibilityHidden(true)
                 Text("\(Int(fraction * 100))%").monospacedDigit()
             }

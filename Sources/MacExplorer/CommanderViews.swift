@@ -3,6 +3,7 @@ import ExplorerCore
 
 struct PowerToolsMenu: View {
     @ObservedObject var workspace: ExplorerWorkspace
+    var compactLabel = false
     @ObservedObject private var settings = CommanderPreferences.shared
     @EnvironmentObject private var preferences: PreferenceStore
     var body: some View {
@@ -22,7 +23,7 @@ struct PowerToolsMenu: View {
             Toggle("Hidden Items", isOn: $preferences.value.showHidden)
             Divider()
             CommanderMenuActions(workspace: workspace, actions: [.settings])
-        } label: { Label("Power Tools", systemImage: "command.square") }
+        } label: { Label(compactLabel ? "Tools" : "Power Tools", systemImage: "command.square").frame(minHeight: InputPreferences.shared.touchFriendly ? 44 : 28) }
             .menuStyle(.borderlessButton).fixedSize().font(.system(size: 11, weight: .medium))
             .disabled(WorkspaceCommandScope.target(workspace) !== workspace)
             .help("Optional Commander tools, selection masks and keyboard profile")
@@ -39,33 +40,43 @@ struct CommanderMenuActions: View {
         }
     }
 }
+/// Content-sized command groups, not six equal-width lanes across the window.
 struct CommanderCommandBar: View {
     @ObservedObject var workspace: ExplorerWorkspace
+    var compact = false
     @ObservedObject private var settings = CommanderPreferences.shared
     @ObservedObject private var input = InputPreferences.shared
     var body: some View {
-        if settings.showCommandBar {
-            VStack(spacing: 0) {
-                ExplorerRule()
-                HStack(spacing: 6) {
-                    ForEach(CommanderAction.functionActions) { action in
-                        Button { action.perform(in: workspace) } label: {
-                            HStack(spacing: 6) {
-                                if settings.classicFunctionKeys {
-                                    Text(action.key).font(.system(size: 10, weight: .semibold, design: .monospaced)).foregroundStyle(ExplorerDesign.muted)
-                                } else { Image(systemName: action.symbol).font(.system(size: 11)) }
-                                Text(action == .newFolder ? "Folder…" : action.title).font(.system(size: 11, weight: .medium)).lineLimit(1)
-                            }.frame(maxWidth: .infinity).frame(height: input.touchFriendly ? 44 : 28).contentShape(Rectangle())
-                        }.buttonStyle(ExplorerIconStyle()).disabled(!action.enabled(in: workspace))
-                            .help(help(action)).accessibilityLabel(help(action)).accessibilityIdentifier("explorer.commander." + action.rawValue)
-                    }
-                    Divider().frame(height: 16).padding(.horizontal, 3)
-                    Menu { CommanderMenuActions(workspace: workspace, actions: [.selectMask, .invert, .sameExtension]) } label: { Text("Select") }
-                        .menuStyle(.borderlessButton).fixedSize().font(.system(size: 11))
-                    Menu { CommanderMenuActions(workspace: workspace, actions: [.compare, .rename, .pack, .extract, .settings]) } label: { Text("Tools") }
-                        .menuStyle(.borderlessButton).fixedSize().font(.system(size: 11))
-                }.padding(.horizontal, 12).padding(.vertical, 4).background(ExplorerDesign.chrome)
-            }.accessibilityIdentifier("explorer.commanderBar")
+        HStack(spacing: 4) {
+            group([.quickLook, .edit])
+            separator
+            group([.copy, .move])
+            separator
+            group([.newFolder, .trash])
+        }.fixedSize().accessibilityIdentifier("explorer.commanderBar")
+    }
+    private var separator: some View { Divider().frame(height: 16).padding(.horizontal, 3) }
+    private func group(_ actions: [CommanderAction]) -> some View {
+        HStack(spacing: 3) {
+            ForEach(actions) { action in
+                Button { action.perform(in: workspace) } label: {
+                    HStack(spacing: 6) {
+                        if settings.classicFunctionKeys && !compact {
+                            Text(action.key).font(.system(size: 9, weight: .medium, design: .monospaced))
+                                .foregroundStyle(ExplorerDesign.muted).padding(.horizontal, 4).padding(.vertical, 2)
+                                .background(ExplorerDesign.canvas.opacity(0.55), in: RoundedRectangle(cornerRadius: 3))
+                        } else { Image(systemName: action.symbol).font(.system(size: 12)) }
+                        if !input.touchFriendly || !compact {
+                            Text(action == .newFolder ? "Folder…" : action.title).font(.system(size: 11, weight: .medium)).lineLimit(1)
+                        }
+                    }.padding(.horizontal, compact ? 7 : 9)
+                        .frame(minWidth: input.touchFriendly ? 44 : 0, minHeight: input.touchFriendly ? 44 : 28)
+                        .contentShape(Rectangle())
+                }.buttonStyle(ExplorerIconStyle(selected: action == .copy))
+                    .disabled(!action.enabled(in: workspace))
+                    .help(help(action)).accessibilityLabel(help(action))
+                    .accessibilityIdentifier("explorer.commander." + action.rawValue)
+            }
         }
     }
     private func help(_ action: CommanderAction) -> String {

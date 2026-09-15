@@ -19,10 +19,11 @@ final class ChromeResponsivenessTests: XCTestCase {
         defer { owner.current.stop(); window.orderOut(nil); window.close() }
         let chrome = NativeWindowChrome(); chrome.persistsConfiguration = false; chrome.attach(to: window, owner: owner)
         owner.current.selection = [files[0].url]; chrome.refresh()
-        let changes = chrome.chromeMutationCount, passes = chrome.validationPasses
+        let changes = chrome.chromeMutationCount, passes = chrome.validationPasses, publications = chrome.workspaceModel.publications
         for index in 0..<1000 {
             owner.current.selection = [files[index % 2].url]; owner.current.focusedURL = files[index % 2].url; chrome.refresh()
         }
+        XCTAssertEqual(chrome.workspaceModel.publications, publications, "File selection must not republish the titlebar workspace")
         XCTAssertEqual(chrome.chromeMutationCount, changes, "Selection must not reapply the whole window's appearance/titlebar")
         XCTAssertEqual(chrome.validationPasses, passes, "Unchanged availability must not revalidate every native item")
         owner.current.selection = []; chrome.refresh(); XCTAssertEqual(chrome.validationPasses, passes + 1)
