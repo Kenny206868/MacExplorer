@@ -107,7 +107,7 @@ struct ArchiveEditPrompt: Identifiable {
             TableColumn("Name") { member in Label(member.name, systemImage: member.isDirectory ? "folder.fill" : "doc").help(member.unsupportedReason ?? member.path) }.width(min: 140, ideal: 260)
             TableColumn("Size") { member in Text(member.isDirectory ? "—" : ByteCountFormatter.string(fromByteCount: member.size, countStyle: .file)).monospacedDigit() }.width(min: 65, ideal: 80)
             TableColumn("Modified") { member in Text(member.modified.map { $0.formatted(date: .abbreviated, time: .omitted) } ?? "—") }.width(min: 100, ideal: 120)
-        }.scrollContentBackground(.hidden).background(ExplorerDesign.canvas)
+        }.alternatingRowBackgrounds(.disabled).scrollContentBackground(.hidden).background(ExplorerDesign.canvas)
             .contextMenu(forSelectionType: String.self) { selected in
                 Button("Rename…") { model.selection = selected; rename() }.disabled(selected.count != 1 || locked || !model.editable)
                 Button("Remove…") { model.pending = .remove(paths: selected) }.disabled(selected.isEmpty || locked || !model.editable)
