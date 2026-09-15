@@ -6,6 +6,7 @@ struct PaneNavigationHeader: View {
     @ObservedObject var workspace: ExplorerWorkspace
     @ObservedObject var tab: BrowserTab
     @ObservedObject private var input = InputPreferences.shared
+    @ObservedObject private var commander = CommanderPreferences.shared
     @FocusState private var queryFocused: Bool
     @State private var showsSearch = false
     private var side: String { workspace.parentWorkspace == nil ? "primary" : "secondary" }
@@ -18,6 +19,11 @@ struct PaneNavigationHeader: View {
                 LocationPathControl(workspace: workspace, tab: tab).frame(maxWidth: .infinity).layoutPriority(1).explorerRegion("pane.address." + side)
                 CommandIcon("Search this pane", "magnifyingglass", selected: showsSearch || !tab.query.isEmpty) {
                     workspace.activatePane(); showsSearch.toggle(); workspace.searchFocused = showsSearch; queryFocused = showsSearch
+                }
+                if commander.paneTerminalButtons {
+                    CommandIcon("Terminal in this pane · ⌥⌘↩", "terminal", disabled: TerminalRequest.directory(for: workspace) == nil) {
+                        workspace.activatePane(); TerminalLauncher.shared.open(from: workspace)
+                    }.accessibilityIdentifier("explorer.terminal." + side)
                 }
                 CommandIcon("Refresh", "arrow.clockwise") { tab.refresh() }
             }.padding(.horizontal, 10).padding(.vertical, 8)

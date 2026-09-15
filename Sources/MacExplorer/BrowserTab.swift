@@ -6,9 +6,9 @@ import ExplorerCore
     let id = UUID()
     @Published var history: NavigationHistory
     @Published var entries: [FileEntry] = [] {
-        didSet { dataRevision &+= 1; if !installingPrepared { hasPreparedListing = false; invalidatePresentation() } }
+        didSet { cachedSelectionStatistics = nil; dataRevision &+= 1; if !installingPrepared { hasPreparedListing = false; invalidatePresentation() } }
     }
-    @Published var selection: Set<URL> = [] { didSet { cachedSelectedEntries = nil } }
+    @Published var selection: Set<URL> = [] { didSet { cachedSelectedEntries = nil; cachedSelectionStatistics = nil } }
     @Published var collapsedGroups: Set<String> = [] { didSet { invalidateNavigation() } }
     @Published var query = "" { didSet { if query != oldValue { scheduleSearch() } } }
     @Published var allLocations = false { didSet { if allLocations != oldValue { scheduleSearch() } } }
@@ -44,6 +44,15 @@ import ExplorerCore
         if let cachedSelectedEntries { return cachedSelectedEntries }
         let result = presentation.selected(selection)
         cachedSelectedEntries = result; selectedProjectionBuilds += 1; return result
+    }
+    private var cachedSelectionStatistics: SelectionStatistics?
+    private(set) var selectionStatisticsBuilds = 0
+    var selectionStatistics: SelectionStatistics {
+        if let cachedSelectionStatistics { return cachedSelectionStatistics }
+        var result = SelectionStatistics()
+        for entry in selectedEntries { result.include(isDirectory: entry.isDirectory, byteCount: entry.size) }
+        cachedSelectionStatistics = result; selectionStatisticsBuilds += 1
+        return result
     }
     var cachedNavigation: FileNavigationSnapshot?
     private(set) var navigationBuilds = 0
@@ -91,6 +100,9 @@ import ExplorerCore
     let spotlight = SpotlightSearch()
     var generation: UInt64 = 0
     var requestSequence: UInt64 = 0
+    @Published var selectionMatching = false
+    var selectionWork: Task<Void, Never>?
+    var selectionWorkID: UUID?
     var dataRevision: UInt64 = 0
     var refreshPending = false
     var installingPrepared = false
@@ -102,7 +114,7 @@ import ExplorerCore
     var visibleEntries: [FileEntry] { presentation.sorted }
     var groups: [(String, [FileEntry])] { presentation.groups.map { ($0.title, $0.entries) } }
     init(_ location: Location) { history = NavigationHistory(location); options = PreferenceStore.shared.folderOptions(location) }
-    func stop() { cancelLoading(); projectionTask?.cancel(); projectionTask = nil; watcher.stop() }
+    func stop() { cancelSelectionWork(); cancelLoading(); projectionTask?.cancel(); projectionTask = nil; watcher.stop() }
     func refresh(selecting urls: [URL]) { pendingSelection = Set(urls); refresh() }
     private func resetSelection() {
         selection = []; selectionAnchor = nil; focusedURL = nil; collapsedGroups = []

@@ -32,6 +32,7 @@ struct ExplorerWindow: View {
                 if let window = notification.object as? NSWindow, window == workspace.window { WorkspaceSessionCoordinator.shared.close(workspace) }
             }
             .onDisappear {
+                workspace.dualPane?.cancelTransferPreparation()
                 DeferredSheetAction.shared.cancel(for: workspace)
                 if let second = workspace.dualPane?.secondary { DeferredSheetAction.shared.cancel(for: second) }
                 workspace.answerCollision(.cancel); workspace.dualPane?.secondary.answerCollision(.cancel)

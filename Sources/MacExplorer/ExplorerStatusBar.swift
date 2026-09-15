@@ -2,61 +2,100 @@ import SwiftUI
 import AppKit
 import ExplorerCore
 
-/// Shared window and Commander-pane status. Activity remains nonmodal.
+/// A stable footer: selection on the leading edge, real storage and activity
+/// on the trailing edge. Expensive summaries are cached by the tab, not rebuilt
+/// for hover/focus/progress publications. Compact panes use the same semantics.
 struct ExplorerStatusBar: View {
     @ObservedObject var workspace: ExplorerWorkspace
     @ObservedObject var tab: BrowserTab
     @ObservedObject private var center = OperationCenter.shared
+    @ObservedObject private var settings = CommanderPreferences.shared
+    @ObservedObject private var input = InputPreferences.shared
     var compact = false
     var active = true
     @State private var volume: StatusVolume?
-    @State private var showActivity = false
+    @State private var showSelection = false
     @State private var showVolume = false
-    private var selection: [FileEntry] { workspace.selected }
-    private var selectedBytes: Int64 {
-        selection.lazy.filter { !$0.isDirectory }.reduce(0) { total, entry in
-            let (sum, overflow) = total.addingReportingOverflow(max(0, entry.size)); return overflow ? .max : sum
-        }
+    private var height: CGFloat { input.touchFriendly ? 44 : compact ? 32 : 36 }
+    private var storageURL: URL? { tab.location.directory ?? tab.location.archiveSource?.deletingLastPathComponent() }
+    private var selectedCount: Int { tab.location.isArchive ? tab.archiveSelectionCount : tab.selectionStatistics.count }
+    private var totalCount: Int { tab.location.isArchive ? tab.archiveItemCount : tab.entries.count }
+    private var summaryText: String {
+        selectedCount > 0 ? "\(selectedCount) of \(totalCount) selected" : "\(totalCount) " + (tab.query.isEmpty ? "items" : "matches")
     }
     var body: some View {
         GeometryReader { geometry in
-            HStack(spacing: 9) {
-                if compact { Circle().fill(active ? Color.accentColor : ExplorerDesign.muted.opacity(0.35)).frame(width: 5, height: 5).accessibilityHidden(true) }
-                if tab.loading { ProgressView().controlSize(.mini).accessibilityLabel("Loading files") }
-                Text("\(tab.location.isArchive ? tab.archiveItemCount : tab.entries.count) " + (tab.query.isEmpty ? "items" : "matches")).monospacedDigit().fixedSize()
-                if tab.location.isArchive && tab.archiveSelectionCount > 0 { Text("· \(tab.archiveSelectionCount) selected").monospacedDigit() }
-                if !selection.isEmpty {
-                    Text("·").accessibilityHidden(true)
-                    Text("\(selection.count) selected").monospacedDigit().lineLimit(1)
-                    if geometry.size.width > 600 && selection.contains(where: { !$0.isDirectory }) {
-                        Text(ByteCountFormatter.string(fromByteCount: selectedBytes, countStyle: .file)).monospacedDigit().fixedSize()
-                            .help("Combined size of selected files; folder contents are not included")
-                    }
+            HStack(spacing: 10) {
+                if compact {
+                    Capsule().fill(active ? Color.accentColor : ExplorerDesign.muted.opacity(0.4)).frame(width: 3, height: 12).accessibilityHidden(true)
                 }
+                if tab.loading || tab.selectionMatching { ProgressView().controlSize(.mini).accessibilityLabel(tab.selectionMatching ? "Matching selection" : "Loading files") }
+                Button { showSelection.toggle() } label: {
+                    HStack(spacing: 7) {
+                        if !compact { Image(systemName: selectedCount > 0 ? "checkmark.circle.fill" : "folder").foregroundStyle(selectedCount > 0 ? Color.accentColor : ExplorerDesign.muted) }
+                        Text(summaryText).monospacedDigit().lineLimit(1)
+                        if selectedCount > 0 && !tab.location.isArchive && geometry.size.width > (compact ? 480 : 850) {
+                            Text(byteText).monospacedDigit().foregroundStyle(ExplorerDesign.muted).lineLimit(1)
+                        }
+                    }.frame(minHeight: height - 4).contentShape(Rectangle())
+                }.popover(isPresented: $showSelection, arrowEdge: .bottom) { selectionDetails }
+                    .help("Selection counts and logical file sizes; folder contents are not scanned")
+                    .accessibilityIdentifier("explorer.selectionSummary")
                 Spacer(minLength: 0)
-                if !compact && geometry.size.width > 1000, let volume {
-                    Button { showVolume.toggle() } label: { Text(ByteCountFormatter.string(fromByteCount: volume.available, countStyle: .file) + " available").monospacedDigit().lineLimit(1) }
-                        .help("Storage information for " + volume.name).popover(isPresented: $showVolume, arrowEdge: .bottom) { StatusVolumeView(volume: volume) }
+                if let volume, (!compact || settings.paneStorage), geometry.size.width > (compact ? 460 : 1000) {
+                    Button { showVolume.toggle() } label: {
+                        HStack(spacing: 6) {
+                            if geometry.size.width > (compact ? 660 : 1200) {
+                                ProgressView(value: Double(max(0, volume.total - volume.available)), total: Double(max(1, volume.total)))
+                                    .frame(width: 38).accessibilityHidden(true)
+                            }
+                            Text(ByteCountFormatter.string(fromByteCount: volume.available, countStyle: .file) + " free").monospacedDigit().fixedSize()
+                        }.frame(minHeight: height - 4)
+                    }.help("Storage on " + volume.name).popover(isPresented: $showVolume, arrowEdge: .bottom) { StatusVolumeView(volume: volume) }
                 }
-                if !compact {
-                    Button { showActivity.toggle() } label: {
-                        if let job = center.jobs.first(where: { !$0.finished }) { StatusOperationBadge(job: job) }
-                        else { Label(center.jobs.contains(where: { !$0.errors.isEmpty }) ? "Review operations" : "Activity", systemImage: center.jobs.contains(where: { !$0.errors.isEmpty }) ? "exclamationmark.circle" : "arrow.up.arrow.down.circle") }
-                    }.help("Show file activity without leaving this folder").popover(isPresented: $showActivity, arrowEdge: .bottom) { FileActivityPopover() }
-                }
+                if !compact { FileActivityButton(); PowerToolsMenu(workspace: workspace) }
                 Menu {
                     Picker("File view", selection: $tab.options.view) { ForEach(ViewMode.allCases, id: \.self) { Label($0.rawValue, systemImage: $0.symbol).tag($0) } }
-                } label: { Image(systemName: tab.options.view.symbol).frame(width: 28, height: 26) }
+                } label: { Image(systemName: tab.options.view.symbol).frame(width: 26, height: height - 4) }
                     .menuStyle(.borderlessButton).menuIndicator(.hidden).accessibilityLabel("File view: " + tab.options.view.rawValue).help("Change file view").disabled(tab.location.isArchive)
-            }.font(.system(size: 11)).foregroundStyle(ExplorerDesign.muted).buttonStyle(.plain)
-                .padding(.horizontal, 12).frame(height: 30).background(ExplorerDesign.chrome)
-        }.frame(height: 30)
-            .task(id: "\(workspace.destination?.path ?? "")|\(center.revision)") {
-                volume = nil; guard let url = workspace.destination else { return }
-                let value = await Task.detached(priority: .utility) { StatusVolume.read(url) }.value
-                if !Task.isCancelled { volume = value }
+            }.font(.system(size: 11)).foregroundStyle(ExplorerDesign.text).buttonStyle(.plain)
+                .padding(.horizontal, 12).frame(height: height).background(ExplorerDesign.chrome)
+        }.frame(height: height)
+            .task(id: "\(storageURL?.path ?? "")|\(center.revision)|\(tab.dataRevision)|\(!compact || settings.paneStorage)") {
+                volume = nil
+                guard !compact || settings.paneStorage, let url = storageURL else { return }
+                do {
+                    let value = try await StatusVolumeService.shared.read(url, revision: center.revision)
+                    try Task.checkCancellation(); volume = value
+                } catch { /* Obsolete/unavailable storage never replaces the new pane's status. */ }
             }
             .accessibilityIdentifier(compact ? "explorer.paneStatus" : "explorer.windowStatus")
+    }
+    private var byteText: String {
+        let statistics = tab.selectionStatistics
+        return (statistics.overflowed ? "≥ " : "") + ByteCountFormatter.string(fromByteCount: statistics.bytes, countStyle: .file)
+    }
+    private var selectionDetails: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(summaryText, systemImage: "checkmark.circle").font(.system(size: 14, weight: .semibold))
+            if !tab.location.isArchive {
+                Text("\(tab.selectionStatistics.files) files · \(tab.selectionStatistics.folders) folders").font(.system(size: 12)).monospacedDigit()
+                Text(byteText).font(.system(size: 21, weight: .medium, design: .rounded)).monospacedDigit()
+                Text("Logical size of selected files only. Folder contents, resource forks and physical disk allocation are not included. No recursive scan runs while you select or scroll.")
+                    .font(.caption).foregroundStyle(ExplorerDesign.muted).fixedSize(horizontal: false, vertical: true)
+            } else { Text("Archive members are separate from filesystem files.").font(.caption).foregroundStyle(ExplorerDesign.muted) }
+        }.padding(20).frame(width: 300).background(ExplorerDesign.canvas)
+    }
+}
+struct FileActivityButton: View {
+    @ObservedObject private var center = OperationCenter.shared
+    @State private var presented = false
+    var body: some View {
+        Button { presented.toggle() } label: {
+            if let job = center.jobs.first(where: { !$0.finished }) { StatusOperationBadge(job: job) }
+            else { Label(center.jobs.contains(where: { !$0.errors.isEmpty }) ? "Review operations" : "Activity", systemImage: center.jobs.contains(where: { !$0.errors.isEmpty }) ? "exclamationmark.circle" : "arrow.up.arrow.down.circle") }
+        }.buttonStyle(.plain).font(.system(size: 11)).help("View transfer progress without leaving this folder")
+            .popover(isPresented: $presented, arrowEdge: .bottom) { FileActivityPopover() }
     }
 }
 private struct StatusOperationBadge: View {

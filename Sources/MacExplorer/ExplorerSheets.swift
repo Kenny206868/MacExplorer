@@ -1,7 +1,7 @@
 import SwiftUI
 import ExplorerCore
 
-enum ExplorerSheet: String, Identifiable { case newFolder, newFile, rename, properties, tags, connect, operations, recovery, archive, fileActions, keyboardHelp, commandPalette, compareFolders; var id: String { rawValue } }
+enum ExplorerSheet: String, Identifiable { case newFolder, newFile, rename, properties, tags, connect, operations, recovery, archive, fileActions, keyboardHelp, commandPalette, compareFolders, selectionMask, commanderSettings; var id: String { rawValue } }
 
 struct ExplorerSheetView: View {
     let sheet: ExplorerSheet
@@ -20,6 +20,8 @@ struct ExplorerSheetView: View {
             case .keyboardHelp: KeyboardHelpView()
             case .commandPalette: CommandPaletteView(workspace: workspace)
             case .compareFolders: ComparisonView(workspace: workspace)
+            case .selectionMask: SelectionMaskView(workspace: workspace, tab: workspace.current)
+            case .commanderSettings: CommanderSettingsView()
             case .archive: if let source = workspace.selectedURLs.first { ArchiveBrowserSheet(workspace: workspace, source: source) }
             }
         }.environmentObject(workspace.preferences).foregroundStyle(ExplorerDesign.text).background(ExplorerDesign.canvas)

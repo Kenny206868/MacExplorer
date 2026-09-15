@@ -40,7 +40,7 @@ final class NativeWindowChromeTests: XCTestCase {
                     size: NSSize(width: width, height: 720), dark: dark, output: output, chromeOwner: workspace) { window in
                         XCTAssertEqual(window.title, "Project Documents")
                         XCTAssertEqual(window.representedURL?.standardizedFileURL.path, folder.standardizedFileURL.path)
-                        XCTAssertEqual(window.toolbarStyle, .unifiedCompact)
+                        XCTAssertEqual(window.toolbarStyle, .unified)
                         let toolbar = try XCTUnwrap(window.toolbar)
                         XCTAssertTrue(toolbar.allowsUserCustomization)
                         XCTAssertFalse(window.isMovableByWindowBackground)

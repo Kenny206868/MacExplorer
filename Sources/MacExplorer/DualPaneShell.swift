@@ -36,6 +36,7 @@ struct DualPaneShell: View {
                         }
                     }.frame(maxHeight: .infinity)
                     ExplorerRule()
+                    CommanderCommandBar(workspace: active)
                     DualTransferBar(controller: controller, workspace: active).explorerRegion("status")
                 }.foregroundStyle(ExplorerDesign.text).background(ExplorerDesign.canvas)
                     .coordinateSpace(name: "Explorer.workspace")
@@ -116,9 +117,10 @@ private struct DualTransferBar: View {
     @ObservedObject var controller: DualPaneController
     @ObservedObject var workspace: ExplorerWorkspace
     @ObservedObject private var input = InputPreferences.shared
+    @ObservedObject private var settings = CommanderPreferences.shared
     var body: some View {
         ViewThatFits(in: .horizontal) { controls(detailed: true); controls(detailed: false) }
-            .padding(.horizontal, 12).frame(height: input.touchFriendly ? 56 : 48).background(ExplorerDesign.chrome)
+            .padding(.horizontal, 12).frame(height: input.touchFriendly ? 52 : 40).background(ExplorerDesign.chrome)
     }
     private func controls(detailed: Bool) -> some View {
         HStack(spacing: 10) {
@@ -132,20 +134,28 @@ private struct DualTransferBar: View {
                 Button("Same Location in Other Pane") { controller.copyLocation(from: workspace) }
                 Divider(); Button("Close Dual Panes") { workspace.toggleDualPane() }
             } label: { Label("Panes", systemImage: "rectangle.split.2x1").font(.system(size: 11)) }.menuStyle(.borderlessButton).fixedSize()
-            if detailed {
+            if controller.preparingTransfer {
+                ProgressView().controlSize(.mini)
+                Text("Checking transfer…").foregroundStyle(ExplorerDesign.muted).fixedSize()
+                Button("Cancel") { controller.cancelTransferPreparation() }.buttonStyle(.plain)
+            } else if let notice = controller.transferNotice {
+                Label(notice, systemImage: "info.circle").lineLimit(1).foregroundStyle(ExplorerDesign.muted).help(notice)
+            } else if detailed {
                 Text(workspace.current.location.title).fontWeight(.medium).lineLimit(1)
                 Image(systemName: "arrow.right").foregroundStyle(Color.accentColor)
-                Text(controller.other(than: workspace)?.current.location.title ?? "Choose destination").lineLimit(1)
+                Text(controller.other(than: workspace)?.current.location.title ?? "Choose destination").lineLimit(1).foregroundStyle(ExplorerDesign.muted)
             }
             Spacer(minLength: 8)
-            Button { workspace.sheet = .operations } label: { Image(systemName: "arrow.up.arrow.down.circle").frame(width: 20) }.help("File operations")
+            FileActivityButton(); PowerToolsMenu(workspace: workspace)
+            if !settings.showCommandBar {
             Button { controller.requestTransfer(from: workspace, move: false) } label: { Label(detailed ? "Copy to other pane" : "Copy", systemImage: "doc.on.doc") }
                 .buttonStyle(ExplorerButtonStyle(primary: true))
-                .disabled(workspace.selected.isEmpty || controller.other(than: workspace)?.destination == nil)
+                .disabled(!CommanderAction.copy.enabled(in: workspace))
                 .help("Copy to the other pane · ⌘⌥C")
             Button { controller.requestTransfer(from: workspace, move: true) } label: { Label("Move…", systemImage: "arrow.right.doc.on.clipboard") }
-                .disabled(workspace.selected.isEmpty || controller.other(than: workspace)?.destination == nil)
+                .disabled(!CommanderAction.copy.enabled(in: workspace))
                 .help("Confirm a move to the other pane · ⌘⌥M")
+            }
         }.font(.system(size: 11)).buttonStyle(ExplorerButtonStyle())
     }
 }

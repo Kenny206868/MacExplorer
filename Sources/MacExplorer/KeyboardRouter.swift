@@ -13,9 +13,12 @@ extension Notification.Name { static let explorerNewWindow = Notification.Name("
         // Composition owns Escape, Return and navigation until committed. The
         // app must not switch panes or steal path focus from an input method.
         if let editor = event.window?.firstResponder as? NSTextView, editor.hasMarkedText() { return event }
+        let editing = event.window?.firstResponder is NSTextView || event.window?.firstResponder is NSTextField
+        let commanderKeys = CommanderPreferences.shared.classicFunctionKeys && workspace.fileSurfaceFocused
+            && !editing && !workspace.current.location.isArchive
         let locationShortcut = !option && ((command != control && !shift && text == "l")
             || (command && !control && shift && text == "g")
-            || (!command && !control && !shift && event.keyCode == 118))
+            || (!command && !control && !shift && event.keyCode == 118 && !commanderKeys))
         if locationShortcut {
             if !event.isARepeat { workspace.editLocation() }
             return nil
@@ -26,11 +29,10 @@ extension Notification.Name { static let explorerNewWindow = Notification.Name("
         }
         if control && !command && event.keyCode == 48 { workspace.cycleTab(shift ? -1 : 1); return nil }
         if control && !command && (event.keyCode == 116 || event.keyCode == 121) { workspace.cycleTab(event.keyCode == 116 ? -1 : 1); return nil }
-        if event.keyCode == 97 && !command && !control && !option { workspace.cycleFocus(backwards: shift); return nil }
+        if event.keyCode == 97 && !command && !control && !option && (!commanderKeys || shift) { workspace.cycleFocus(backwards: shift); return nil }
         if (command || control) && shift && !option && text == "p" {
             workspace.sheet = .commandPalette; return nil
         }
-        let editing = event.window?.firstResponder is NSTextView || event.window?.firstResponder is NSTextField
         if editing {
             if event.keyCode == 53 && (workspace.addressFocused || workspace.searchFocused) {
                 if workspace.searchFocused && !workspace.current.query.isEmpty { workspace.current.query = "" }
@@ -43,6 +45,11 @@ extension Notification.Name { static let explorerNewWindow = Notification.Name("
                 if text == "z" || text == "y" { if text == "y" || shift { editor?.undoManager?.redo() } else { editor?.undoManager?.undo() }; return nil }
             }
             return event
+        }
+        if commanderKeys && !command && !control && !option && !shift,
+           let action = CommanderAction.functionKey(event.keyCode) {
+            if !event.isARepeat { action.perform(in: workspace) }
+            return nil
         }
         if command && !control && !option && ["+", "=", "-"].contains(text) { workspace.zoomFileView(text == "-" ? -1 : 1); return nil }
         if (command || control) && shift && text == "d" && !option { workspace.toggleDualPane(); return nil }

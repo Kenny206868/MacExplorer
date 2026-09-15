@@ -41,9 +41,9 @@ final class DualPaneStateTests: XCTestCase {
         try manager.createDirectory(at: destination, withIntermediateDirectories: true)
         let file = source.appendingPathComponent("file.txt"); try Data("source".utf8).write(to: file)
         let root = workspace(); root.current.entries = [try FileEntry(url: file)]; root.current.selection = [file]
-        let request = try PaneTransferRequest(source: root, destination: destination, move: false)
+        let request = try await PaneTransferRequest.prepare(source: root, destination: destination, move: false)
         root.current.selection = []
-        try request.validate()
+        try request.snapshot.validate()
         XCTAssertEqual(request.job.sources.first?.path, file.path)
         XCTAssertEqual(request.job.destination?.path, destination.path)
         let engine = FileOperationEngine(recoveryDirectory: fixture.appendingPathComponent("receipts"))
@@ -51,7 +51,7 @@ final class DualPaneStateTests: XCTestCase {
         XCTAssertTrue(result.errors.isEmpty, result.errors.description)
         XCTAssertEqual(try String(contentsOf: destination.appendingPathComponent("file.txt")), "source")
         try Data("changed source".utf8).write(to: file)
-        XCTAssertThrowsError(try request.validate())
+        XCTAssertThrowsError(try request.snapshot.validate())
         root.current.stop()
     }
     @MainActor func testChangedDestinationCannotBeConfirmed() async throws {
@@ -62,9 +62,9 @@ final class DualPaneStateTests: XCTestCase {
         try manager.createDirectory(at: destination, withIntermediateDirectories: true)
         let file = fixture.appendingPathComponent("file.txt"); try Data("source".utf8).write(to: file)
         root.current.entries = [try FileEntry(url: file)]; root.current.selection = [file]
-        let request = try PaneTransferRequest(source: root, destination: destination, move: true)
+        let request = try await PaneTransferRequest.prepare(source: root, destination: destination, move: true)
         try manager.moveItem(at: destination, to: fixture.appendingPathComponent("old"))
         try manager.createDirectory(at: destination, withIntermediateDirectories: false)
-        XCTAssertThrowsError(try request.validate()); XCTAssertTrue(FileNames.exists(file))
+        XCTAssertThrowsError(try request.snapshot.validate()); XCTAssertTrue(FileNames.exists(file))
     }
 }

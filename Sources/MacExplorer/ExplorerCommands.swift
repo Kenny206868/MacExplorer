@@ -9,18 +9,28 @@ struct ExplorerCommands: Commands {
     @ObservedObject private var operations = OperationCenter.shared
     @ObservedObject private var preferences = PreferenceStore.shared
     @ObservedObject private var input = InputPreferences.shared
+    @ObservedObject private var commander = CommanderPreferences.shared
     @Environment(\.openWindow) private var openWindow
     private var target: ExplorerWorkspace? { WorkspaceCommandScope.target(workspace) }
     private var hasSelection: Bool { target?.selected.isEmpty == false }
     private var canUndo: Bool { target != nil && !operations.undoStack.isEmpty && operations.runningCount == 0 && !operations.historyBusy }
     private var canRedo: Bool { target != nil && !operations.redoStack.isEmpty && operations.runningCount == 0 && !operations.historyBusy }
-    private var canTransfer: Bool { guard let target else { return false }; return target.paneController?.other(than: target)?.destination != nil }
+    private var canTransfer: Bool { guard let target else { return false }; return target.paneController?.preparingTransfer == false && target.paneController?.other(than: target)?.destination != nil }
     var body: some Commands {
         CommandGroup(after: .appInfo) { Button("Check for Updates…") { updater.check() }.disabled(!updater.configured || !updater.canCheck) }
         CommandGroup(replacing: .newItem) { newItems }
         CommandGroup(replacing: .undoRedo) { undoItems }
         CommandGroup(replacing: .pasteboard) { clipboardItems }
         CommandMenu("File Actions") { fileActions.disabled(!hasSelection || TextEditingCommands.isEditing) }
+        CommandMenu("Commander") {
+            Toggle("Show Command Bar", isOn: $commander.showCommandBar)
+            Toggle("Classic F3–F8 File Commands", isOn: $commander.classicFunctionKeys)
+            Divider()
+            ForEach([CommanderAction.selectMask, .sameExtension, .invert, .compare, .rename, .pack, .extract, .settings]) { action in
+                Button(action.title) { if let target { action.perform(in: target) } }
+                    .disabled(target.map { !action.enabled(in: $0) } ?? true)
+            }
+        }
         CommandMenu("Go") { navigationItems.disabled(target == nil) }
         CommandGroup(after: .toolbar) { viewItems }
         CommandGroup(after: .windowArrangement) { windowItems }

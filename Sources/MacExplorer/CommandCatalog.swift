@@ -7,7 +7,7 @@ import ExplorerCore
 enum ExplorerCommand: String, CaseIterable, Identifiable {
     case goToFolder, newTab, dualPanes, openFolder, newFolder, newFile, open, rename
     case copy, cut, paste, copyPath, duplicate, trash, permanentDelete, quickLook, properties, tags, compress, archive, reveal
-    case selectAll, invertSelection, clearSelection, selectMode
+    case selectAll, invertSelection, clearSelection, selectMode, selectionMask, commanderSettings, commanderBar
     case back, forward, up, home, computer, search, refresh, terminal, terminalOther, terminalBoth, connect
     case details, icons, gallery, hidden, extensions, previewPane, detailsPane, compact, touch, gestures
     case compareFolders, switchPane, copyOther, moveOther, swapPanes, equalPanes
@@ -36,6 +36,9 @@ enum ExplorerCommand: String, CaseIterable, Identifiable {
         case .compress: return ("Compress to ZIP", "Files", "archivebox", "", "archive pack")
         case .archive: return ("Browse / Extract Archive…", "Files", "archivebox", "", "unzip password decompress")
         case .reveal: return ("Reveal in Finder", "Files", "arrow.up.forward.square", "", "show original")
+        case .selectionMask: return ("Select by Pattern…", "Selection", "line.3.horizontal.decrease.circle", "", "commander wildcard mask include exclude filename")
+        case .commanderSettings: return ("Commander Settings…", "Workspace", "slider.horizontal.3", "", "power tools classic function keys terminal title bar storage")
+        case .commanderBar: return ("Toggle Commander Command Bar", "Workspace", "command.square", "", "power buttons f3 f4 f5 f6 f7 f8")
         case .selectAll: return ("Select All", "Selection", "checkmark.square", "⌘A", "every file")
         case .invertSelection: return ("Invert Selection", "Selection", "square.on.circle", "", "reverse toggle")
         case .clearSelection: return ("Clear Selection", "Selection", "square", "Esc", "deselect none")
@@ -46,7 +49,7 @@ enum ExplorerCommand: String, CaseIterable, Identifiable {
         case .home: return ("Home", "Navigate", "house", "⇧⌘H", "recent quick access")
         case .computer: return ("This Mac", "Navigate", "desktopcomputer", "", "computer devices drives volumes")
         case .search: return ("Search Files", "Navigate", "magnifyingglass", "⌘F", "find query")
-        case .refresh: return ("Refresh", "Navigate", "arrow.clockwise", "F5", "reload")
+        case .refresh: return ("Refresh", "Navigate", "arrow.clockwise", "", "reload F5 native profile")
         case .terminal: return ("Open in Terminal", "Navigate", "terminal", "⌥⌘↩", "shell console active directory")
         case .terminalOther: return ("Open Other Pane in Terminal", "Panes", "terminal", "", "shell console opposite directory")
         case .terminalBoth: return ("Open Both Panes in Terminal", "Panes", "terminal", "⇧⌥⌘↩", "shell console left right working directories")
@@ -93,6 +96,8 @@ enum ExplorerCommand: String, CaseIterable, Identifiable {
         default: break
         }
         switch self {
+        case .selectionMask:
+            return workspace.current.location.isArchive || workspace.current.navigation.entries.isEmpty ? "Open a filesystem listing with visible items" : nil
         case .terminal:
             return TerminalRequest.directory(for: workspace) == nil ? "Open a filesystem folder first" : nil
         case .terminalOther:
@@ -108,6 +113,7 @@ enum ExplorerCommand: String, CaseIterable, Identifiable {
         case .clearSelection: return workspace.current.selection.isEmpty ? "Nothing is selected" : nil
         case .switchPane, .equalPanes, .swapPanes, .copyOther, .moveOther:
             guard let panes = workspace.paneController else { return "Turn on dual panes first" }
+            if (self == .copyOther || self == .moveOther), panes.preparingTransfer { return "A transfer is being prepared" }
             if (self == .copyOther || self == .moveOther), panes.other(than: workspace)?.destination == nil { return "Open a destination folder in the other pane" }
             if self == .swapPanes && workspace.operations.runningCount > 0 { return "Wait for active transfers to finish" }
         case .dualPanes:
@@ -143,6 +149,9 @@ enum ExplorerCommand: String, CaseIterable, Identifiable {
         case .compress: w.compress()
         case .archive: w.extract()
         case .reveal: NSWorkspace.shared.activateFileViewerSelecting(w.selectedURLs)
+        case .selectionMask: w.sheet = .selectionMask
+        case .commanderSettings: w.sheet = .commanderSettings
+        case .commanderBar: CommanderPreferences.shared.showCommandBar.toggle()
         case .selectAll: w.selectAll()
         case .invertSelection: w.invertSelection()
         case .clearSelection: w.current.selection = []

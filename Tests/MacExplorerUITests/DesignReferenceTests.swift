@@ -54,7 +54,7 @@ final class DesignReferenceTests: XCTestCase {
                 let inspector = try XCTUnwrap(geometry["inspector"])
                 XCTAssertEqual(inspector.width, 254, accuracy: 0.5, captureName)
                 XCTAssertEqual(try XCTUnwrap(geometry["files"]).width, 793, accuracy: 0.5, captureName)
-                for (region, height) in [("tabs", 42.0), ("address", 54), ("status", 30)] { XCTAssertEqual(try XCTUnwrap(geometry[region]).height, height, accuracy: 0.5, captureName + " " + region) }
+                for (region, height) in [("tabs", 42.0), ("address", 54), ("status", 36)] { XCTAssertEqual(try XCTUnwrap(geometry[region]).height, height, accuracy: 0.5, captureName + " " + region) }
                 XCTAssertNil(geometry["commands"], "The real native toolbar replaces duplicate content commands")
                 let bitmap = try XCTUnwrap(NSBitmapImageRep(data: Data(contentsOf: output.appendingPathComponent(captureName + ".png"))))
                 try assertColor(bitmap, point: CGPoint(x: 880, y: 20), rgb: dark ? 0x292B33 : 0xF7F7F9, label: captureName + " tab chrome")

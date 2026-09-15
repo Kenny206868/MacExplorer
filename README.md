@@ -16,6 +16,10 @@ The implementation includes actual filesystem browsing, nine view choices, per-f
 
 **This is not a claim of 100% Windows Explorer or Finder subsystem parity.** Windows-only shell extensions and filesystem features do not translate into public macOS APIs. Finder's desktop, protected system services, and other applications' open/save dialogs are not replaced. Review [capabilities and boundaries](docs/CAPABILITIES.md) before deploying against important files.
 
+## Commander workspace
+
+Use **Power Tools → Enable Commander Workspace** for independent native panes and a compact file-command strip. **Commander Settings** separately controls the command strip, classic F3–F8 file keys, compact title bar, per-pane storage and Terminal buttons. The normal key profile stays unchanged until explicitly enabled. Editable paths and Terminal shortcuts work in either profile. Selection masks, multi-rename, comparison and archive tools are available without enabling every option. See the [Commander workspace guide](docs/COMMANDER-WORKSPACE.md) for behavior, safeguards and validation boundaries.
+
 ## Build
 
 Install Xcode and its command-line tools, then open `Package.swift` in Xcode, or run:
@@ -28,7 +32,7 @@ VERSION=0.1.0 bash scripts/package.sh
 open dist/MacExplorer.app
 ```
 
-The distributable bundle embeds Sparkle; running the loose SwiftPM executable is not a substitute for testing the installed app bundle. Release builds support Apple Silicon and Intel. This session does not claim a completed macOS build or validation run; CI exposes the actual status.
+The distributable bundle embeds Sparkle; running the loose SwiftPM executable is not a substitute for testing the installed app bundle. Release builds support Apple Silicon and Intel. Consult the exact commit’s CI runs and artifacts for its verified build and native-test status.
 
 ## Distribution and updates
 

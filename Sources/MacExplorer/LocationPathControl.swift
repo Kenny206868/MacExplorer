@@ -50,7 +50,7 @@ extension Notification.Name { static let explorerEditPath = Notification.Name("M
                 Button(action: begin) {
                     Text(display).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
                         .frame(maxWidth: .infinity, alignment: .leading).frame(height: input.target).contentShape(Rectangle())
-                }.buttonStyle(.plain).help("Edit full path · ⌘L / Ctrl+L / F4").accessibilityLabel("Edit location: " + display)
+                }.buttonStyle(.plain).help("Edit full path · ⌘L / Ctrl+L").accessibilityLabel("Edit location: " + display)
             }
             if editor.resolving { ProgressView().controlSize(.mini).accessibilityLabel("Checking location") }
             if editor.editing {

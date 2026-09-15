@@ -48,6 +48,7 @@ struct WorkspaceShell: View {
                     }
                 }.frame(maxHeight: .infinity)
                 ExplorerRule()
+                CommanderCommandBar(workspace: workspace)
                 ExplorerStatusBar(workspace: workspace, tab: tab).explorerRegion("status")
             }.coordinateSpace(name: "Explorer.workspace")
                 .foregroundStyle(ExplorerDesign.text).background(ExplorerDesign.canvas)

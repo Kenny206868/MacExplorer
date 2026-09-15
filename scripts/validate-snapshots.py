@@ -8,7 +8,7 @@ import math
 import pathlib
 import struct
 
-MANIFESTS = ('captures.json', 'archive-captures.json', 'design-captures.json', 'dual-captures.json', 'settings-captures.json', 'inline-captures.json', 'command-captures.json', 'comparison-captures.json', 'window-captures.json', 'status-captures.json', 'recovery-captures.json', 'archive-location-captures.json')
+MANIFESTS = ('captures.json', 'archive-captures.json', 'design-captures.json', 'dual-captures.json', 'settings-captures.json', 'inline-captures.json', 'command-captures.json', 'comparison-captures.json', 'window-captures.json', 'status-captures.json', 'recovery-captures.json', 'archive-location-captures.json', 'commander-captures.json')
 CASES = {'extra-large-icons', 'large-icons', 'medium-icons', 'small-icons', 'list', 'details',
          'tiles', 'content', 'gallery', 'grouped-selection', 'panes-800', 'panes-1024', 'panes-1600',
          'empty', 'permission-denied', 'dialog-newFolder', 'dialog-newFile', 'dialog-rename',
@@ -19,7 +19,8 @@ CASES = {'extra-large-icons', 'large-icons', 'medium-icons', 'small-icons', 'lis
          'settings-updates', 'inline-rename', 'commands', 'commands-search', 'commands-disabled', 'commands-empty',
          'comparison-metadata', 'comparison-data', 'comparison-empty',
          'native-window', 'native-dual-window', 'native-narrow-window', 'status-idle', 'status-running', 'status-storage',
-         'recovery-interrupted', 'recovery-history', 'archive-location-root', 'archive-location-folder'}
+         'recovery-interrupted', 'recovery-history', 'archive-location-root', 'archive-location-folder', 'native-commander-window', 'native-commander-narrow',
+         'commander-settings', 'selection-masks'}
 REQUIRED = {f'{theme}-{case}' for theme in ('light', 'dark') for case in CASES}
 
 
@@ -67,14 +68,14 @@ def validate(root: pathlib.Path) -> dict:
     links = ''.join(f'<a href="#{html.escape(item["name"])}">{html.escape(item["name"])}</a>' for item in captures if '-native-' in item['name'] or '-status-' in item['name'])
     page = '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>MacExplorer native review</title><style>' + style + '</style><header><h1>MacExplorer · native design review</h1><p>Production SwiftUI views and complete native windows. Geometry, palette, selection, bitmap and state checks supplement visual review; they do not certify physical input devices or every assistive-technology interaction.</p><nav>' + links + '</nav></header><main>'
     (root / 'index.html').write_text(page + ''.join(cards) + '</main></html>')
-    report = {'schemaVersion': 10, 'captures': len(captures), 'sha256': checksums,
+    report = {'schemaVersion': 11, 'captures': len(captures), 'sha256': checksums,
               'checks': ['coverage', 'PNG dimensions', 'nonblank rendering', 'opaque sRGB compositing',
                          'reference pane geometry', 'reference palette', 'selected-row palette', 'empty canvas palette',
                          'dual-pane containment and non-overlap', 'independent pane selection', 'responsive orientation intent',
                          'touch and keyboard action coverage', 'all settings pages', 'native inline filename editor',
                          'searchable command palette and native search focus', 'read-only directory comparison states',
                          'complete titled windows', 'standard window buttons', 'native toolbar identity and customization',
-                         'nonmodal activity and storage surfaces', 'archive virtual locations and journal-backed recovery']}
+                         'nonmodal activity and storage surfaces', 'archive virtual locations and journal-backed recovery', 'optional Commander controls and full-path pane chrome']}
     (root / 'validation.json').write_text(json.dumps(report, indent=2) + '\n')
     return report
 
