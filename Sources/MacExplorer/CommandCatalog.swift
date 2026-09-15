@@ -8,7 +8,7 @@ enum ExplorerCommand: String, CaseIterable, Identifiable {
     case goToFolder, newTab, dualPanes, openFolder, newFolder, newFile, open, rename
     case copy, cut, paste, copyPath, duplicate, trash, permanentDelete, quickLook, properties, tags, compress, archive, reveal
     case selectAll, invertSelection, clearSelection, selectMode
-    case back, forward, up, home, computer, search, refresh, terminal, terminalBoth, connect
+    case back, forward, up, home, computer, search, refresh, terminal, terminalOther, terminalBoth, connect
     case details, icons, gallery, hidden, extensions, previewPane, detailsPane, compact, touch, gestures
     case compareFolders, switchPane, copyOther, moveOther, swapPanes, equalPanes
     case reopenTab, undo, redo, operations, recovery, keyboard
@@ -48,6 +48,7 @@ enum ExplorerCommand: String, CaseIterable, Identifiable {
         case .search: return ("Search Files", "Navigate", "magnifyingglass", "⌘F", "find query")
         case .refresh: return ("Refresh", "Navigate", "arrow.clockwise", "F5", "reload")
         case .terminal: return ("Open in Terminal", "Navigate", "terminal", "⌥⌘↩", "shell console active directory")
+        case .terminalOther: return ("Open Other Pane in Terminal", "Panes", "terminal", "", "shell console opposite directory")
         case .terminalBoth: return ("Open Both Panes in Terminal", "Panes", "terminal", "⇧⌥⌘↩", "shell console left right working directories")
         case .connect: return ("Connect to Server…", "Navigate", "network", "⌘K", "smb afp nfs webdav share")
         case .details: return ("Details View", "View", "list.bullet", "", "table columns rows")
@@ -83,13 +84,19 @@ enum ExplorerCommand: String, CaseIterable, Identifiable {
     @MainActor func unavailable(in workspace: ExplorerWorkspace) -> String? {
         if needsFiles && workspace.selected.isEmpty { return "Select a file or folder first" }
         switch self {
-        case .paste, .newFolder, .newFile, .duplicate, .compress, .up:
+        case .paste, .newFolder, .newFile, .duplicate, .compress:
             if workspace.destination == nil { return "Open a filesystem folder first" }
+        case .up:
+            if workspace.destination == nil && !workspace.current.location.isArchive { return "Open a folder or archive first" }
+        case .details, .icons, .gallery:
+            if workspace.current.location.isArchive { return "Archive members use their own file view" }
         default: break
         }
         switch self {
         case .terminal:
             return TerminalRequest.directory(for: workspace) == nil ? "Open a filesystem folder first" : nil
+        case .terminalOther:
+            if (try? TerminalRequest.capture(workspace, scope: .other)) == nil { return "Open a filesystem folder in the other pane" }
         case .terminalBoth:
             guard let other = workspace.paneController?.other(than: workspace) else { return "Turn on dual panes first" }
             return TerminalRequest.directory(for: workspace) == nil || TerminalRequest.directory(for: other) == nil ? "Open a filesystem folder in both panes" : nil
@@ -148,6 +155,7 @@ enum ExplorerCommand: String, CaseIterable, Identifiable {
         case .search: w.searchFocused = true
         case .refresh: w.current.refresh()
         case .terminal: TerminalLauncher.shared.open(from: w)
+        case .terminalOther: TerminalLauncher.shared.open(from: w, scope: .other)
         case .terminalBoth: TerminalLauncher.shared.open(from: w, scope: .both)
         case .connect: w.sheet = .connect
         case .details: w.current.options.view = .details
@@ -190,7 +198,7 @@ enum ExplorerCommand: String, CaseIterable, Identifiable {
         self.command = command; owner = workspace; tabID = workspace.current.id; location = workspace.current.location
         files = command.needsFiles ? try FileActionSnapshot(workspace) : nil
         clipboardGeneration = command == .paste ? NSPasteboard.general.changeCount : nil
-        let other = command == .terminalBoth ? workspace.paneController?.other(than: workspace) : nil
+        let other = (command == .terminalBoth || command == .terminalOther) ? workspace.paneController?.other(than: workspace) : nil
         otherTerminalTab = other?.current.id; otherTerminalLocation = other?.current.location
     }
     func validate() throws {
