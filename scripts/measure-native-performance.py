@@ -19,8 +19,11 @@ def main() -> int:
     for name in ('execution.json', 'performance-validation.json', 'large-directory-performance.json'):
         (output / name).unlink(missing_ok=True)
     (output / 'COMMIT.txt').write_text(commit + '\n')
-    command = ['swift', 'test', '--configuration', 'release', '-Xswiftc',
-               '-DMACEXPLORER_PERFORMANCE_DIAGNOSTICS', '--filter', 'LargeDirectoryScrollTests']
+    # The selected workload is XCTestCase. Do not launch an additional empty
+    # Swift Testing run whose discovery/exit path is outside this benchmark.
+    command = ['swift', 'test', '--configuration', 'release', '--enable-xctest',
+               '--disable-swift-testing', '-Xswiftc', '-DMACEXPLORER_PERFORMANCE_DIAGNOSTICS',
+               '--filter', 'LargeDirectoryScrollTests']
     started = time.monotonic()
     status = 125
     try:
@@ -30,7 +33,8 @@ def main() -> int:
             status = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=False).returncode
     finally:
         evidence = {'schemaVersion': 1, 'sourceCommit': commit, 'command': command,
-                    'testExitCode': status, 'elapsedSeconds': time.monotonic() - started}
+                    'testFramework': 'XCTest', 'testExitCode': status,
+                    'elapsedSeconds': time.monotonic() - started}
         (output / 'execution.json').write_text(json.dumps(evidence, indent=2) + '\n')
         print(json.dumps(evidence, indent=2), flush=True)
         log = output / 'test.log'
