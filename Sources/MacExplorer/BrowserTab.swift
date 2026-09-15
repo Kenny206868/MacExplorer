@@ -6,8 +6,8 @@ import ExplorerCore
     let id = UUID()
     @Published var history: NavigationHistory
     @Published var entries: [FileEntry] = [] { didSet { invalidatePresentation() } }
-    @Published var selection: Set<URL> = []
-    @Published var collapsedGroups: Set<String> = []
+    @Published var selection: Set<URL> = [] { didSet { cachedSelectedEntries = nil } }
+    @Published var collapsedGroups: Set<String> = [] { didSet { invalidateNavigation() } }
     @Published var query = "" { didSet { if query != oldValue { scheduleSearch() } } }
     @Published var allLocations = false { didSet { scheduleSearch() } }
     @Published var loading = false
@@ -19,6 +19,7 @@ import ExplorerCore
         didSet {
             if options.sort != oldValue.sort || options.descending != oldValue.descending || options.foldersFirst != oldValue.foldersFirst || options.group != oldValue.group { invalidatePresentation() }
             if options.group != oldValue.group { collapsedGroups = [] }
+            if options.view != oldValue.view { invalidateNavigation() }
             PreferenceStore.shared.remember(location, options)
         }
     }
@@ -29,8 +30,31 @@ import ExplorerCore
         let value = FilePresentation(entries: entries, options: options)
         cachedPresentation = value; presentationBuilds += 1; return value
     }
-    func invalidatePresentation() { cachedPresentation = nil }
-    var selectedEntries: [FileEntry] { presentation.selected(selection) }
+    func invalidatePresentation() { cachedPresentation = nil; cachedSelectedEntries = nil; invalidateNavigation() }
+    private var cachedSelectedEntries: [FileEntry]?
+    private(set) var selectedProjectionBuilds = 0
+    var selectedEntries: [FileEntry] {
+        if let cachedSelectedEntries { return cachedSelectedEntries }
+        let result = presentation.selected(selection)
+        cachedSelectedEntries = result; selectedProjectionBuilds += 1; return result
+    }
+    private var cachedNavigation: FileNavigationSnapshot?
+    private(set) var navigationBuilds = 0
+    private func invalidateNavigation() { cachedNavigation = nil }
+    var navigation: FileNavigationSnapshot {
+        if let cachedNavigation { return cachedNavigation }
+        let entries = options.view == .details && !collapsedGroups.isEmpty
+            ? presentation.groups.filter { !collapsedGroups.contains($0.title) }.flatMap(\.entries) : presentation.ordered
+        let value = FileNavigationSnapshot(entries: entries)
+        cachedNavigation = value; navigationBuilds += 1; return value
+    }
+    /// Avoid repeatedly publishing unchanged focus/selection at boundaries and
+    /// during high-frequency marquee input. No filesystem access occurs here.
+    func applySelection(_ value: ExplorerSelection<URL>) {
+        if selection != value.selected { selection = value.selected }
+        selectionAnchor = value.anchor
+        if focusedURL != value.focus { focusedURL = value.focus }
+    }
     var selectionAnchor: URL?
     @Published var focusedURL: URL?
     var rangeBaseline: Set<URL>?
@@ -43,10 +67,7 @@ import ExplorerCore
     }
     var displayEntries: [FileEntry] { presentation.ordered }
     /// The keyboard and Details rendering consume the same expanded rows.
-    var navigableEntries: [FileEntry] {
-        guard options.view == .details, !collapsedGroups.isEmpty else { return displayEntries }
-        return presentation.groups.filter { !collapsedGroups.contains($0.title) }.flatMap(\.entries)
-    }
+    var navigableEntries: [FileEntry] { navigation.entries }
     func toggleGroup(_ title: String) {
         guard !title.isEmpty, let group = presentation.groups.first(where: { $0.title == title }) else { return }
         if collapsedGroups.remove(title) != nil { return }
