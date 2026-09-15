@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import QuickLookThumbnailing
 import QuickLookUI
 import UniformTypeIdentifiers
 import ExplorerCore
@@ -32,8 +31,7 @@ import ExplorerCore
     }
     static func privacySettings() { if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") { NSWorkspace.shared.open(url) } }
     static func eject(_ url: URL, owner: ExplorerWorkspace) {
-        do { try NSWorkspace.shared.unmountAndEjectDevice(at: url) }
-        catch { owner.fail("Could not eject", error.localizedDescription) }
+        do { try NSWorkspace.shared.unmountAndEjectDevice(at: url) } catch { owner.fail("Could not eject", error.localizedDescription) }
     }
     static func volumes() -> [URL] { FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: [.volumeNameKey, .volumeTotalCapacityKey, .volumeAvailableCapacityKey, .volumeIsInternalKey, .volumeIsLocalKey], options: [.skipHiddenVolumes]) ?? [] }
     static func cloudFolders() -> [URL] {
@@ -41,12 +39,11 @@ import ExplorerCore
         var folders: [URL] = []
         let iCloud = home.appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs")
         if FileNames.exists(iCloud) { folders.append(iCloud) }
-        let cloud = home.appendingPathComponent("Library/CloudStorage")
-        folders += (try? FileManager.default.contentsOfDirectory(at: cloud, includingPropertiesForKeys: [.isDirectoryKey], options: .skipsHiddenFiles)) ?? []
+        folders += (try? FileManager.default.contentsOfDirectory(at: home.appendingPathComponent("Library/CloudStorage"), includingPropertiesForKeys: [.isDirectoryKey], options: .skipsHiddenFiles)) ?? []
         return folders
     }
     static func trashDirectories() -> [URL] {
-        let manager = FileManager.default, home = manager.homeDirectoryForCurrentUser
+        let home = FileManager.default.homeDirectoryForCurrentUser
         var result = [home.appendingPathComponent(".Trash")]
         for volume in volumes() where volume.path != "/" {
             let trash = volume.appendingPathComponent(".Trashes/\(getuid())")
@@ -55,38 +52,6 @@ import ExplorerCore
         return result
     }
 }
-
-@MainActor final class ThumbnailCache {
-    static let shared = ThumbnailCache()
-    private let cache = NSCache<NSString, NSImage>()
-    init() { cache.totalCostLimit = 96 * 1024 * 1024; cache.countLimit = 600 }
-    func image(for entry: FileEntry, size: CGFloat) async -> NSImage {
-        let scale = NSScreen.main?.backingScaleFactor ?? 2
-        let key = "\(entry.url.path)|\(entry.modified.timeIntervalSince1970)|\(entry.size)|\(size)|\(scale)" as NSString
-        if let image = cache.object(forKey: key) { return image }
-        let fallback = NSWorkspace.shared.icon(forFile: entry.url.path)
-        guard size > 24, !entry.canBrowse, entry.isDownloaded else { return fallback }
-        let request = QLThumbnailGenerator.Request(fileAt: entry.url, size: CGSize(width: size, height: size), scale: scale, representationTypes: .all)
-        let result: NSImage? = await withCheckedContinuation { continuation in
-            QLThumbnailGenerator.shared.generateBestRepresentation(for: request) { representation, _ in continuation.resume(returning: representation?.nsImage) }
-        }
-        let image = result ?? fallback
-        cache.setObject(image, forKey: key, cost: Int(size * scale * size * scale * 4))
-        return image
-    }
-}
-struct FileThumbnail: View {
-    let entry: FileEntry
-    var size: CGFloat = 20
-    @State private var image: NSImage?
-    var body: some View {
-        Image(nsImage: image ?? NSWorkspace.shared.icon(forFile: entry.url.path)).resizable().scaledToFit().frame(width: size, height: size)
-            .overlay(alignment: .bottomLeading) { if entry.isSymbolicLink { Image(systemName: "arrow.turn.up.right").font(.system(size: max(8, size / 5))).padding(2).background(.regularMaterial, in: Circle()) } }
-            .task(id: "\(entry.url.path)|\(entry.modified)|\(size)") { let value = await ThumbnailCache.shared.image(for: entry, size: size); if !Task.isCancelled { image = value } }
-            .accessibilityHidden(true)
-    }
-}
-/// Embedded OS Quick Look content; all application chrome remains SwiftUI.
 struct NativePreview: NSViewRepresentable {
     let url: URL
     func makeNSView(context: Context) -> QLPreviewView { let view = QLPreviewView(frame: .zero, style: .normal)!; view.autostarts = false; view.shouldCloseWithWindow = true; return view }

@@ -25,8 +25,7 @@ private actor ArtworkCache {
         if let value = cache.object(forKey: key) { return value }
         let image = try FilePreviewRenderer.render(entry.url, maximumPixelSize: pixels)
         try Task.checkCancellation()
-        let value = ArtworkRaster(image); cache.setObject(value, forKey: key, cost: image.bytesPerRow * image.height)
-        return value
+        let value = ArtworkRaster(image); cache.setObject(value, forKey: key, cost: image.bytesPerRow * image.height); return value
     }
 }
 private struct DecodedArtwork: View {
@@ -39,11 +38,11 @@ private struct DecodedArtwork: View {
     var body: some View {
         Group {
             if let raster { Image(decorative: raster.image, scale: displayScale).resizable().interpolation(.high).scaledToFit() }
-            else { Image(nsImage: NSWorkspace.shared.icon(forFile: entry.url.path)).resizable().scaledToFit() }
+            else { FileThumbnail(entry: entry, size: size, iconOnly: true) }
         }.frame(width: size, height: size).task(id: key) {
             raster = nil
             do { let value = try await ArtworkCache.shared.render(entry, pixels: pixels); if !Task.isCancelled { raster = value } }
-            catch { /* Keep the real native file icon when a preview is unavailable. */ }
+            catch { /* An unavailable preview keeps its asynchronous native icon. */ }
         }
     }
 }
@@ -56,10 +55,8 @@ struct FileArtwork: View {
             else if entry.isImage || entry.url.pathExtension.lowercased() == "pdf" { DecodedArtwork(entry: entry, size: size) }
             else {
                 VStack(spacing: 7) {
-                    Image(nsImage: NSWorkspace.shared.icon(forFile: entry.url.path)).resizable().scaledToFit().frame(width: size * 0.76, height: size * 0.76)
-                    if size >= 70, !entry.url.pathExtension.isEmpty {
-                        Text(entry.url.pathExtension.uppercased()).font(.system(size: 9, weight: .semibold)).tracking(1).foregroundStyle(ExplorerDesign.muted)
-                    }
+                    FileThumbnail(entry: entry, size: size * 0.76, iconOnly: true)
+                    if size >= 70, !entry.url.pathExtension.isEmpty { Text(entry.url.pathExtension.uppercased()).font(.system(size: 9, weight: .semibold)).tracking(1).foregroundStyle(ExplorerDesign.muted) }
                 }.frame(width: size, height: size)
             }
         }.frame(width: size, height: size).accessibilityHidden(true)
@@ -75,8 +72,7 @@ struct FolderShortcutCard: View {
                 FolderArtwork()
                 VStack(alignment: .leading, spacing: 5) {
                     Text(url.lastPathComponent).font(.system(size: 12, weight: .medium)).lineLimit(1)
-                    Text(url.deletingLastPathComponent() == FileManager.default.homeDirectoryForCurrentUser ? "This Mac" : url.deletingLastPathComponent().lastPathComponent)
-                        .font(.system(size: 10)).foregroundStyle(ExplorerDesign.muted).lineLimit(1)
+                    Text(url.deletingLastPathComponent() == FileManager.default.homeDirectoryForCurrentUser ? "This Mac" : url.deletingLastPathComponent().lastPathComponent).font(.system(size: 10)).foregroundStyle(ExplorerDesign.muted).lineLimit(1)
                 }
                 Spacer(minLength: 0)
             }.padding(.horizontal, 16).frame(maxWidth: .infinity, minHeight: 70, alignment: .leading)
@@ -94,8 +90,7 @@ struct ExplorerCardStyle: ButtonStyle {
         var body: some View {
             configuration.label.foregroundStyle(ExplorerDesign.text)
                 .background(hovered || configuration.isPressed ? ExplorerDesign.hover.opacity(0.45) : ExplorerDesign.canvas, in: RoundedRectangle(cornerRadius: 9))
-                .overlay(RoundedRectangle(cornerRadius: 9).stroke(hovered ? Color.accentColor.opacity(0.4) : ExplorerDesign.separator, lineWidth: 1))
-                .onHover { hovered = $0 }
+                .overlay(RoundedRectangle(cornerRadius: 9).stroke(hovered ? Color.accentColor.opacity(0.4) : ExplorerDesign.separator, lineWidth: 1)).onHover { hovered = $0 }
         }
     }
 }
