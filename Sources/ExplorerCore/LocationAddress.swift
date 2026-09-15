@@ -11,15 +11,7 @@ public enum LocationAddress: Equatable, Sendable {
     /// only for explicit file: URLs, never for a plain filesystem path.
     public static func parse(_ input: String, relativeTo base: URL, home: URL) throws -> Self {
         guard base.isFileURL, home.isFileURL else { throw LocationAddressError.invalid("Choose a local base folder.") }
-        var text = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, text.utf8.count <= 32_768,
-              !text.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
-            throw LocationAddressError.invalid("Enter a path without control characters (maximum 32 KiB).")
-        }
-        if text.count >= 2, let first = text.first, (first == "\"" || first == "'"), text.last == first {
-            text.removeFirst(); text.removeLast()
-        }
-        guard !text.isEmpty else { throw LocationAddressError.invalid("Enter a folder path.") }
+        let text = try draftText(input)
         if text.lowercased().hasPrefix("file:") || text.contains("://") {
             guard let parts = URLComponents(string: text), let scheme = parts.scheme?.lowercased(),
                   let url = parts.url, parts.user == nil, parts.password == nil else {
@@ -32,17 +24,45 @@ public enum LocationAddress: Equatable, Sendable {
                       !path.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
                     throw LocationAddressError.invalid("Use a local file URL without a query or fragment.")
                 }
-                return .file(URL(fileURLWithPath: path, isDirectory: false).standardizedFileURL)
+                return .file(lexicalFileURL(path))
             }
             guard ["smb", "afp", "nfs", "https"].contains(scheme), parts.host?.isEmpty == false else {
                 throw LocationAddressError.invalid("Supported server routes are SMB, AFP, NFS and HTTPS WebDAV.")
             }
             return .server(url)
         }
-        if text == "~" { return .file(home.standardizedFileURL) }
-        if text.hasPrefix("~/") { return .file(home.appendingPathComponent(String(text.dropFirst(2)), isDirectory: false).standardizedFileURL) }
+        if text == "~" { return .file(lexicalFileURL(home.path)) }
+        if text.hasPrefix("~/") { return .file(lexicalFileURL(home.path + "/" + text.dropFirst(2))) }
         if text.hasPrefix("~") { throw LocationAddressError.invalid("Use ~ for your home folder or enter an absolute path.") }
-        return .file((text.hasPrefix("/") ? URL(fileURLWithPath: text, isDirectory: false) : base.appendingPathComponent(text, isDirectory: false)).standardizedFileURL)
+        return .file(lexicalFileURL(text.hasPrefix("/") ? text : base.path + "/" + text))
+    }
+
+    static func draftText(_ input: String) throws -> String {
+        guard input.utf8.count <= 32_768,
+              !input.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+            throw LocationAddressError.invalid("Enter a path without control characters (maximum 32 KiB).")
+        }
+        var text = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.count >= 2, let first = text.first, (first == "\"" || first == "'"), text.last == first {
+            text.removeFirst(); text.removeLast()
+        }
+        guard !text.isEmpty else { throw LocationAddressError.invalid("Enter a folder path.") }
+        return text
+    }
+
+    /// Pure lexical normalization: never consult the filesystem, resolve links,
+    /// or rewrite /private aliases while a text field is typing on MainActor.
+    /// Parent components have logical-path semantics, including above symlinks.
+    private static func lexicalFileURL(_ path: String) -> URL {
+        var components: [Substring] = []
+        for component in path.split(separator: "/") {
+            switch component {
+            case ".": continue
+            case "..": if !components.isEmpty { components.removeLast() }
+            default: components.append(component)
+            }
+        }
+        return URL(fileURLWithPath: "/" + components.joined(separator: "/"), isDirectory: false)
     }
 }
 public struct PathSuggestion: Identifiable, Equatable, Sendable {
@@ -71,7 +91,19 @@ public final class PathAddressService: @unchecked Sendable {
     private let lock = NSLock()
     private struct Cached { let time: TimeInterval; let folders: [URL]; let truncated: Bool }
     private var cache: [String: Cached] = [:]
-    public init() {}
+    private let scanLimit: Int
+    private let folderLimit: Int
+    private let scanTimeBudget: TimeInterval
+    private let clock: @Sendable () -> TimeInterval
+    public convenience init() { self.init(scanLimit: 4096, folderLimit: 512, scanTimeBudget: 0.15) }
+    /// Inject budgets and a monotonic clock for deterministic limit tests.
+    /// The production initializer always uses the bounded defaults above.
+    init(scanLimit: Int, folderLimit: Int, scanTimeBudget: TimeInterval,
+         clock: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
+        self.scanLimit = max(1, min(4096, scanLimit)); self.folderLimit = max(1, min(512, folderLimit))
+        self.scanTimeBudget = scanTimeBudget.isFinite ? max(0.001, min(30, scanTimeBudget)) : 0.15
+        self.clock = clock
+    }
     public func resolve(_ text: String, base: URL, home: URL) async throws -> PathResolution {
         let address = try LocationAddress.parse(text, relativeTo: base, home: home)
         return try await navigationLane.run { cancellation in
@@ -87,8 +119,9 @@ public final class PathAddressService: @unchecked Sendable {
         }
     }
     public func suggestions(_ text: String, base: URL, home: URL, showHidden: Bool) async throws -> PathSuggestions {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, case .file(let resolved) = try LocationAddress.parse(trimmed, relativeTo: base, home: home) else { return PathSuggestions() }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return PathSuggestions() }
+        let trimmed = try LocationAddress.draftText(text)
+        guard case .file(let resolved) = try LocationAddress.parse(text, relativeTo: base, home: home) else { return PathSuggestions() }
         let hasTrailingSlash = trimmed.hasSuffix("/") || trimmed == "~"
         let directory = trimmed == "." ? base : hasTrailingSlash ? resolved : resolved.deletingLastPathComponent()
         let prefix = trimmed == "." ? "." : hasTrailingSlash ? "" : resolved.lastPathComponent
@@ -103,9 +136,9 @@ public final class PathAddressService: @unchecked Sendable {
         }
     }
     private func folders(in directory: URL, cancellation: FileReadCancellation) throws -> Cached {
-        let now = ProcessInfo.processInfo.systemUptime, key = directory.path
+        let now = clock(), key = directory.path
         lock.lock(); let cached = cache[key]; lock.unlock()
-        if let cached, now - cached.time < 1.5 { return cached }
+        if let cached, now >= cached.time, now - cached.time < 1.5 { return cached }
         var failed: Error?
         guard let iterator = FileManager.default.enumerator(at: directory,
             includingPropertiesForKeys: [.isDirectoryKey, .isPackageKey],
@@ -116,13 +149,13 @@ public final class PathAddressService: @unchecked Sendable {
         var folders: [URL] = [], count = 0, truncated = false
         while let url = iterator.nextObject() as? URL {
             try cancellation.check(); count += 1
-            if count > 4096 || folders.count >= 512 || ProcessInfo.processInfo.systemUptime - now > 0.15 { truncated = true; break }
+            if count > scanLimit || folders.count >= folderLimit || clock() - now > scanTimeBudget { truncated = true; break }
             if let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey]),
                values.isDirectory == true && values.isPackage != true { folders.append(url) }
         }
         if let failed { throw failed }
         try cancellation.check()
-        let result = Cached(time: ProcessInfo.processInfo.systemUptime, folders: folders, truncated: truncated)
+        let result = Cached(time: clock(), folders: folders, truncated: truncated)
         lock.lock()
         if cache.count >= 16, let oldest = cache.min(by: { $0.value.time < $1.value.time })?.key { cache.removeValue(forKey: oldest) }
         cache[key] = result; lock.unlock()
