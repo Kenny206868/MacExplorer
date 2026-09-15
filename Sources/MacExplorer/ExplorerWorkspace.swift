@@ -104,9 +104,9 @@ import ExplorerCore
     }
     func transfer(to folder: URL, move: Bool, urls: [URL]? = nil) { operations.submit(FileJob(move ? .move : .copy, sources: urls ?? selectedURLs, destination: folder), owner: self) }
     func duplicate() { guard let destination else { return }; operations.submit(FileJob(.copy, sources: selectedURLs, destination: destination), owner: self) }
-    func delete(permanent: Bool = false) {
+    func delete(permanent: Bool = false, alwaysConfirm: Bool = false) {
         guard !selectedURLs.isEmpty else { return }
-        if permanent || current.location == .trash || preferences.value.confirmTrash { pendingDeletion = selectedURLs; permanentDeletion = permanent || current.location == .trash }
+        if alwaysConfirm || permanent || current.location == .trash || preferences.value.confirmTrash { pendingDeletion = selectedURLs; permanentDeletion = permanent || current.location == .trash }
         else { operations.submit(FileJob(.trash, sources: selectedURLs), owner: self) }
     }
     func confirmDeletion() { let urls = pendingDeletion; pendingDeletion = []; operations.submit(FileJob(permanentDeletion ? .delete : .trash, sources: urls), owner: self) }

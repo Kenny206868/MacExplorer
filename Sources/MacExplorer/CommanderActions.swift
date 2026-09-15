@@ -57,7 +57,7 @@ enum CommanderAction: String, CaseIterable, Identifiable {
             NativeIntegration.openWith(workspace.selectedURLs, application: app, owner: workspace)
         case .copy, .move: workspace.paneController?.requestTransfer(from: workspace, move: self == .move)
         case .newFolder: workspace.sheet = .newFolder
-        case .trash: workspace.delete()
+        case .trash: workspace.delete(alwaysConfirm: true)
         case .selectMask: workspace.sheet = .selectionMask
         case .invert: workspace.invertSelection()
         case .sameExtension:
@@ -66,7 +66,7 @@ enum CommanderAction: String, CaseIterable, Identifiable {
         case .compare: workspace.sheet = .compareFolders
         case .rename: workspace.sheet = .rename
         case .pack: workspace.compress()
-        case .extract: workspace.sheet = .archive
+        case .extract: workspace.extract()
         case .settings: workspace.sheet = .commanderSettings
         }
     }

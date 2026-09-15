@@ -181,7 +181,19 @@ struct PaneTransferRequest: Identifiable {
         else { AppRouter.shared.active = self; if files { focusFileSurface() } }
     }
     func confirmPaneTransfer() {
-        let root = windowRoot; guard let request = root.pendingPaneTransfer else { return }; root.pendingPaneTransfer = nil
-        root.dualPane?.confirm(request)
+        let root = windowRoot
+        guard let request = root.pendingPaneTransfer, let controller = root.dualPane, let source = request.owner else {
+            root.pendingPaneTransfer = nil; return
+        }
+        // Accept the user's decision, but do not race the confirmation's
+        // AppKit dismissal. The existing handoff observes real window focus
+        // and sheet removal, rejects a replacement modal, and runs only once.
+        DeferredSheetAction.shared.enqueue(for: source, validate: { [weak source, weak controller] in
+            guard let source, let controller, source.windowRoot.dualPane === controller else {
+                throw ExplorerError.message("The source pane closed before the move could start.")
+            }
+        }) { [weak controller] _ in controller?.confirm(request) }
+        root.pendingPaneTransfer = nil
+        DeferredSheetAction.shared.didDismiss(source)
     }
 }
