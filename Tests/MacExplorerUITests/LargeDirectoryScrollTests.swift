@@ -19,12 +19,14 @@ final class LargeDirectoryScrollTests: XCTestCase {
         }
     }
     struct Evidence: Codable {
-        let schemaVersion = 1
+        let schemaVersion = 2
+        let buildConfiguration: String
         let entries: Int
         let maximumLiveRowAnchors: Int
         let selectionBodyEvaluations: UInt64
         let selectionLayout: Timing
         let scrollLayout: Timing
+        let continuousScrollLayout: Timing
         let keyDispatch: Timing
         let notes: String
     }
@@ -66,7 +68,7 @@ final class LargeDirectoryScrollTests: XCTestCase {
         XCTAssertGreaterThan(maximumAnchors, 0, "Real file rows must be mounted")
         let builds = tab.presentationBuilds, reads = tab.refreshStarts
         let rows = tab.displayEntries
-        var selectTimes: [Double] = [], scrollTimes: [Double] = [], keyTimes: [Double] = []
+        var selectTimes: [Double] = [], scrollTimes: [Double] = [], continuousTimes: [Double] = [], keyTimes: [Double] = []
         let beforeBodies = FileRenderDiagnostics.detailsRowBodies
         for index in 0..<12 {
             let start = CACurrentMediaTime()
@@ -76,8 +78,9 @@ final class LargeDirectoryScrollTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(16))
         }
         let selectionBodies = FileRenderDiagnostics.detailsRowBodies - beforeBodies
-        // Allow layout/prefetch passes, but reject publication fan-out through
-        // the entire directory rather than a bounded set of visible rows.
+        #if DEBUG || MACEXPLORER_PERFORMANCE_DIAGNOSTICS
+        XCTAssertGreaterThan(selectionBodies, 0, "The rendering counter must actually be enabled")
+        #endif
         XCTAssertLessThan(selectionBodies, 240, "Selection must not reevaluate every retained file row")
         for index in 1...16 {
             let start = CACurrentMediaTime()
@@ -88,6 +91,20 @@ final class LargeDirectoryScrollTests: XCTestCase {
             maximumAnchors = max(maximumAnchors, FileDragRouter.shared.liveAnchorCount - initialAnchors)
         }
         XCTAssertGreaterThan(clip.bounds.origin.y, 1000, "The production scroll view must actually move")
+        // Separately record small continuous deltas over an already visited
+        // region. Large cold jumps and steady scrolling are different workloads.
+        clip.scroll(to: NSPoint(x: 0, y: 720)); scroll.reflectScrolledClipView(clip)
+        try await Task.sleep(for: .milliseconds(100)); host.layoutSubtreeIfNeeded()
+        let selectionBeforeScroll = tab.selection
+        for index in 1...120 {
+            let start = CACurrentMediaTime()
+            clip.scroll(to: NSPoint(x: 0, y: 720 + index * 6)); scroll.reflectScrolledClipView(clip)
+            host.layoutSubtreeIfNeeded(); host.displayIfNeeded(); CATransaction.flush()
+            continuousTimes.append((CACurrentMediaTime() - start) * 1000)
+            try await Task.sleep(for: .milliseconds(8))
+            maximumAnchors = max(maximumAnchors, FileDragRouter.shared.liveAnchorCount - initialAnchors)
+        }
+        XCTAssertEqual(tab.selection, selectionBeforeScroll, "Scrolling must not mutate selected files")
         XCTAssertLessThan(maximumAnchors, 500, "A short scroll cannot eagerly mount an entire directory")
         workspace.focusFileSurface()
         for index in 0..<200 {
@@ -99,9 +116,17 @@ final class LargeDirectoryScrollTests: XCTestCase {
         }
         XCTAssertEqual(tab.presentationBuilds, builds, "Scrolling and input do not sort the listing")
         XCTAssertEqual(tab.refreshStarts, reads, "Scrolling and input do not enumerate the filesystem")
-        let report = Evidence(entries: rows.count, maximumLiveRowAnchors: maximumAnchors,
-            selectionBodyEvaluations: selectionBodies, selectionLayout: Timing(selectTimes), scrollLayout: Timing(scrollTimes), keyDispatch: Timing(keyTimes),
-            notes: "Debug shared-runner timings; programmatic NSScrollView layout/display and actual NSEvent key dispatch. Not end-to-end input-to-photon latency or a hardware refresh-rate certification.")
+        #if DEBUG
+        let configuration = "debug"
+        #elseif MACEXPLORER_PERFORMANCE_DIAGNOSTICS
+        let configuration = "release-instrumented"
+        #else
+        let configuration = "release-no-render-counters"
+        #endif
+        let report = Evidence(buildConfiguration: configuration, entries: rows.count, maximumLiveRowAnchors: maximumAnchors,
+            selectionBodyEvaluations: selectionBodies, selectionLayout: Timing(selectTimes), scrollLayout: Timing(scrollTimes),
+            continuousScrollLayout: Timing(continuousTimes), keyDispatch: Timing(keyTimes),
+            notes: "Shared-runner CPU diagnostics: actual NSScrollView layout/display and NSEvent key dispatch. Large jumps are 180 points; continuous deltas are 6 points. Explicit CATransaction flushing is included. Not input-to-photon latency, GPU completion, display cadence or hardware refresh-rate certification.")
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let output = URL(fileURLWithPath: outputPath)
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)

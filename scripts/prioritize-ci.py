@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Cancel only superseded, non-milestone CI runs belonging to this repository.
 
-This also retires historical per-SHA concurrency groups during migration.
-Never cancel a completed run, a PR, another workflow, or an [alpha] milestone.
-Failure to acquire write permission is reported, not a reason to skip tests.
+Milestone status comes from the full commit message, not GitHub's truncated
+run display title. Missing commit metadata is preserved rather than guessed.
 """
 from __future__ import annotations
 import json
@@ -16,13 +15,18 @@ import urllib.request
 def superseded(runs: list[dict], repository: str, current_number: int, current_id: int) -> list[int]:
     result = set()
     for run in runs:
+        commit = run.get('head_commit')
+        message = commit.get('message') if isinstance(commit, dict) else None
+        if (not isinstance(message, str) or not message.strip()
+                or '[alpha]' in message.lower()
+                or '[alpha]' in str(run.get('display_title', '')).lower()):
+            continue
         if (run.get('id') == current_id or run.get('run_number', current_number) >= current_number
                 or run.get('name') != 'CI' or run.get('event') != 'push' or run.get('head_branch') != 'main'
                 or run.get('status') not in ('queued', 'in_progress', 'waiting', 'requested', 'pending')
-                or run.get('head_repository', {}).get('full_name') != repository
-                or '[alpha]' in run.get('display_title', '')):
+                or run.get('head_repository', {}).get('full_name') != repository):
             continue
-        if isinstance(run.get('id'), int) and run['id'] > 0:
+        if isinstance(run.get('id'), int) and not isinstance(run['id'], bool) and run['id'] > 0:
             result.add(run['id'])
     return sorted(result)
 
@@ -45,7 +49,6 @@ def main() -> None:
             return json.loads(data) if data else None
 
     try:
-        # A run which started after a newer push must not cancel its successor.
         branch = request('/git/ref/heads/main')
         if branch['object']['sha'] != os.environ['GITHUB_SHA']:
             print('A newer commit owns main; leaving queue decisions to its run.')

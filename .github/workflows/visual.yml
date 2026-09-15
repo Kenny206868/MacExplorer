@@ -11,7 +11,7 @@ jobs:
       matrix:
         os: [macos-15-intel, macos-26]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 25
     env:
       TZ: UTC
       LANG: en_US.UTF-8
@@ -31,7 +31,26 @@ jobs:
           swift test --filter MacExplorerUITests 2>&1 | tee artifacts/native-views/test.log
       - name: Validate coverage, dimensions, and render content
         run: python3 scripts/validate-snapshots.py artifacts/native-views
-      - name: Upload native PNGs, test log, and offline review gallery
+      - name: Measure optimized native input and scrolling
+        if: matrix.os == 'macos-26'
+        env:
+          MACEXPLORER_SNAPSHOT_DIR: ${{ github.workspace }}/artifacts/native-views/optimized-performance
+        run: |
+          set -o pipefail
+          mkdir -p "$MACEXPLORER_SNAPSHOT_DIR"
+          git rev-parse HEAD > "$MACEXPLORER_SNAPSHOT_DIR/COMMIT.txt"
+          swift test --configuration release -Xswiftc -DMACEXPLORER_PERFORMANCE_DIAGNOSTICS --filter LargeDirectoryScrollTests 2>&1 | tee "$MACEXPLORER_SNAPSHOT_DIR/test.log"
+          python3 - "$MACEXPLORER_SNAPSHOT_DIR" <<'PY'
+          import json, pathlib, sys
+          root = pathlib.Path(sys.argv[1])
+          report = json.loads((root / 'large-directory-performance.json').read_text())
+          assert report['buildConfiguration'] == 'release-instrumented', report
+          assert report['entries'] == 2000 and report['continuousScrollLayout']['samples'] == 120, report
+          assert 0 < report['selectionBodyEvaluations'] < 240, report
+          assert 0 < report['maximumLiveRowAnchors'] < 500, report
+          print(json.dumps(report, indent=2))
+          PY
+      - name: Upload native PNGs, timing evidence, test log, and offline review gallery
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

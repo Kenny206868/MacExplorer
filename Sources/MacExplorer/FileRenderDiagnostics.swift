@@ -1,11 +1,11 @@
 import Foundation
 
-/// Debug-only aggregate counters. No file paths, content or user identifiers.
-/// They do not publish UI changes and are inert in distribution builds.
+/// Aggregate counters, enabled only for debug or an explicitly instrumented
+/// performance build. No paths, content, identifiers or UI publications.
 @MainActor enum FileRenderDiagnostics {
     private(set) static var detailsRowBodies: UInt64 = 0
     @inline(__always) static func detailsRowBody() {
-        #if DEBUG
+        #if DEBUG || MACEXPLORER_PERFORMANCE_DIAGNOSTICS
         detailsRowBodies &+= 1
         #endif
     }
