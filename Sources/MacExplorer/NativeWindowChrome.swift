@@ -32,7 +32,7 @@ import ExplorerCore
             // in-process synchronization of toolbars with the same identifier.
             // Isolate nonpersistent previews/tests from each other and real windows.
             let identifier = persistsConfiguration ? Self.identifier
-                : NSToolbar.Identifier(Self.identifier.rawValue + ".isolated." + UUID().uuidString)
+                : NSToolbar.Identifier(Self.identifier + ".isolated." + UUID().uuidString)
             let toolbar = NSToolbar(identifier: identifier)
             toolbar.delegate = self; toolbar.allowsUserCustomization = true
             toolbar.autosavesConfiguration = persistsConfiguration; toolbar.displayMode = .iconOnly
