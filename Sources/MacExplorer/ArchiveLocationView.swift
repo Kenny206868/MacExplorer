@@ -2,59 +2,6 @@ import SwiftUI
 import AppKit
 import ExplorerCore
 
-@MainActor final class ArchiveLocationModel: ObservableObject {
-    let source: URL
-    let engine: FileOperationEngine
-    @Published var catalog: ArchiveCatalog?
-    @Published var selection = Set<String>()
-    @Published var password = ""
-    @Published var loading = false
-    @Published var busy = false
-    @Published var notice: String?
-    @Published var prompt: ArchiveEditPrompt?
-    @Published var pending: ArchiveMutation?
-    private(set) var fingerprint: FileFingerprint?
-    private var scanControl = OperationControl()
-    init(source: URL, engine: FileOperationEngine = .shared) { self.source = source; self.engine = engine }
-    var editable: Bool {
-        guard let catalog, !catalog.containsEncryption, catalog.members.allSatisfy({ $0.unsupportedReason == nil }) else { return false }
-        let format = catalog.format.lowercased()
-        return format.hasPrefix("zip") || format.contains("tar") || format.contains("pax")
-    }
-    func scan() async {
-        scanControl.cancel(); let control = OperationControl(); scanControl = control
-        loading = true; let source = source, options = ArchiveReadOptions(passphrase: password)
-        do {
-            let pair = try await withTaskCancellationHandler {
-                try await Task.detached(priority: .userInitiated) {
-                    let identity = try FileFingerprint(source)
-                    let catalog = try ArchiveCatalog.read(source, options: options, control: control)
-                    guard identity.matches(source) else { throw ExplorerError.message("Archive changed while reading. Reload it.") }
-                    return (catalog, identity)
-                }.value
-            } onCancel: { control.cancel() }
-            guard !Task.isCancelled, scanControl === control else { return }
-            catalog = pair.0; fingerprint = pair.1; loading = false
-        } catch {
-            guard !Task.isCancelled, scanControl === control else { return }
-            loading = false; catalog = nil; fingerprint = nil; notice = error.localizedDescription
-        }
-    }
-    func stop() { scanControl.cancel(); password = "" }
-    func apply(_ mutation: ArchiveMutation, center: OperationCenter) async {
-        guard !busy, !loading, editable, let fingerprint else { return }
-        busy = true; notice = nil
-        let row = OperationRow(title: "Edit " + source.lastPathComponent); center.jobs.insert(row, at: 0)
-        row.status = "Rebuilding archive"
-        let result = await engine.editArchive(source, expected: fingerprint, mutation: mutation, control: row.control)
-        row.cancelled = result.cancelled; row.errors = result.errors; row.finished = true
-        row.status = result.cancelled ? "Cancelled — original retained" : result.errors.isEmpty ? "Archive saved" : "Archive edit stopped"
-        if !result.receipt.steps.isEmpty { center.undoStack.append(result.receipt); center.redoStack.removeAll() }
-        selection = []; busy = false; center.revision += 1
-        notice = result.errors.isEmpty ? (result.cancelled ? "Edit cancelled." : "Saved. The previous archive is retained in Recovery & history.") : result.errors.joined(separator: "\n")
-        await scan()
-    }
-}
 struct ArchiveEditPrompt: Identifiable {
     let id = UUID()
     let path: String?
@@ -76,10 +23,10 @@ struct ArchiveEditPrompt: Identifiable {
         self.workspace = workspace; self.tab = tab; self.folder = folder
         _model = StateObject(wrappedValue: model ?? ArchiveLocationModel(source: source))
     }
-    private var children: [ArchiveMember] { (model.catalog?.children(of: folder) ?? []).filter { tab.query.isEmpty || $0.name.localizedStandardContains(tab.query) } }
-    private var locked: Bool { model.busy || model.loading || selectingFiles }
+    private var children: [ArchiveMember] { model.listing.entries }
+    private var locked: Bool { model.busy || model.loading || model.filtering || selectingFiles }
     private var other: ExplorerWorkspace? { workspace.paneController?.other(than: workspace) }
-    private var selection: [ArchiveMember] { children.filter { model.selection.contains($0.path) } }
+    private var selection: [ArchiveMember] { model.selected }
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -93,16 +40,16 @@ struct ArchiveEditPrompt: Identifiable {
                 HStack(alignment: .top) { Image(systemName: "info.circle"); Text(notice).textSelection(.enabled).fixedSize(horizontal: false, vertical: true); Spacer(minLength: 0) }
                     .font(.system(size: 11)).foregroundStyle(ExplorerDesign.muted).padding(12)
             }
-            if model.catalog?.containsEncryption == true || model.catalog == nil {
+            if model.encrypted || model.catalog == nil {
                 HStack { SecureField("Archive password (memory only)", text: $model.password).textFieldStyle(.roundedBorder)
-                    Button("Reload") { Task { await model.scan() } }.disabled(locked) }.padding(12)
+                    Button("Reload") { Task { await model.scan(force: true) } }.disabled(locked) }.padding(12)
             }
         }.background(ExplorerDesign.canvas).foregroundStyle(ExplorerDesign.text)
-            .task(id: tab.archiveRevision) { await model.scan(); updateStatus() }
+            .task(id: tab.archiveRevision) { model.show(folder: folder, query: tab.query); await model.scan(); updateStatus() }
             .onChange(of: model.selection) { _, _ in updateStatus() }
-            .onChange(of: model.catalog?.members.count) { _, _ in updateStatus() }
-            .onChange(of: tab.query) { _, _ in model.selection.formIntersection(Set(children.map(\.path))); updateStatus() }
-            .onChange(of: folder) { _, _ in model.selection = []; updateStatus() }
+            .onChange(of: model.listingRevision) { _, _ in updateStatus() }
+            .onChange(of: tab.query) { _, value in model.show(folder: folder, query: value) }
+            .onChange(of: folder) { _, value in model.show(folder: value, query: tab.query) }
             .onDisappear { model.stop() }
             .sheet(item: $model.prompt, onDismiss: {
                 guard let mutation = namedMutation else { return }; namedMutation = nil
@@ -129,7 +76,7 @@ struct ArchiveEditPrompt: Identifiable {
                 Text(model.catalog.map { "\($0.format) · \($0.members.count) entries" } ?? "Reading archive…").font(.system(size: 10)).foregroundStyle(ExplorerDesign.muted)
             }
             Spacer(minLength: 0)
-            if model.loading || model.busy { ProgressView().controlSize(.small) }
+            if model.loading || model.busy || model.filtering { ProgressView().controlSize(.small) }
             Label(model.editable ? "Editable" : "Read only", systemImage: model.editable ? "pencil" : "lock")
                 .font(.system(size: 10, weight: .medium)).foregroundStyle(ExplorerDesign.muted)
                 .padding(.horizontal, 8).padding(.vertical, 5).background(ExplorerDesign.chrome, in: Capsule())
