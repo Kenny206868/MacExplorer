@@ -2,19 +2,25 @@ import SwiftUI
 import AppKit
 import ExplorerCore
 
-/// Window controls are owned and rendered by AppKit. Using standard symbol/menu
-/// items avoids nested NSHostingView materials losing glyph contrast on macOS 26.
-/// All application panels and file surfaces remain SwiftUI.
+/// Standard window controls and customizable native symbol/menu toolbar items.
+/// The file browsers and every application-created panel remain SwiftUI.
 @MainActor final class NativeWindowChrome: NSObject, NSToolbarDelegate, NSToolbarItemValidation, NSMenuItemValidation, NSMenuDelegate {
     static let identifier = NSToolbar.Identifier("MacExplorer.FileToolbar.v2")
     var persistsConfiguration = true
     weak var owner: ExplorerWorkspace?
     private weak var installedWindow: NSWindow?
     private var toolbar: NSToolbar?
+    private var windowObservers: [NSObjectProtocol] = []
     func attach(to window: NSWindow, owner: ExplorerWorkspace) {
         self.owner = owner
         if installedWindow !== window {
+            windowObservers.forEach(NotificationCenter.default.removeObserver); windowObservers = []
             installedWindow = window
+            for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification, NSWindow.didBecomeMainNotification] {
+                windowObservers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.refresh() }
+                })
+            }
             let toolbar = NSToolbar(identifier: Self.identifier)
             toolbar.delegate = self; toolbar.allowsUserCustomization = true
             toolbar.autosavesConfiguration = persistsConfiguration; toolbar.displayMode = .iconOnly
@@ -25,6 +31,7 @@ import ExplorerCore
         }
         refresh()
     }
+    deinit { windowObservers.forEach(NotificationCenter.default.removeObserver) }
     func refresh() {
         guard let root = owner, let window = installedWindow else { return }
         let workspace = root.routedWorkspace, location = workspace.current.location
@@ -45,22 +52,15 @@ import ExplorerCore
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier identifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
         guard let action = WindowChromeAction(rawValue: identifier.rawValue) else { return nil }
         let item: NSToolbarItem
-        if action.isMenu {
-            let menuItem = NSMenuToolbarItem(itemIdentifier: identifier)
-            menuItem.menu = menu(action); item = menuItem
-        } else {
-            item = NSToolbarItem(itemIdentifier: identifier)
-            item.target = self; item.action = #selector(invokeToolbar(_:))
-        }
+        if action.isMenu { let menuItem = NSMenuToolbarItem(itemIdentifier: identifier); menuItem.menu = menu(action); item = menuItem }
+        else { item = NSToolbarItem(itemIdentifier: identifier); item.target = self; item.action = #selector(invokeToolbar(_:)) }
         item.label = action.title; item.paletteLabel = action.title; item.toolTip = action.title
-        item.image = NSImage(systemSymbolName: action.symbol, accessibilityDescription: action.title)
-        item.image?.isTemplate = true
-        item.isBordered = true
+        item.image = NSImage(systemSymbolName: action.symbol, accessibilityDescription: action.title); item.image?.isTemplate = true
+        item.isBordered = false
         item.isNavigational = action == .back || action == .forward || action == .up
         let overflow = NSMenuItem(title: action.title, action: #selector(invokeMenu(_:)), keyEquivalent: "")
         overflow.target = self; overflow.representedObject = action.rawValue
-        if action.isMenu { overflow.submenu = menu(action) }
-        item.menuFormRepresentation = overflow
+        if action.isMenu { overflow.submenu = menu(action) }; item.menuFormRepresentation = overflow
         return item
     }
     func validateToolbarItem(_ item: NSToolbarItem) -> Bool { WindowChromeAction(rawValue: item.itemIdentifier.rawValue)?.enabled(for: owner) ?? false }
@@ -105,14 +105,13 @@ import ExplorerCore
             for mode in ViewMode.allCases { add(mode.rawValue, "view:" + mode.rawValue) }
             result.addItem(.separator())
             for field in SortField.allCases { add("Sort by " + field.rawValue, "sort:" + field.rawValue) }
-            add("Descending", "descending"); add("Folders First", "foldersFirst")
-            result.addItem(.separator())
+            add("Descending", "descending"); add("Folders First", "foldersFirst"); result.addItem(.separator())
             for field in GroupField.allCases { add("Group: " + field.rawValue, "group:" + field.rawValue) }
             result.addItem(.separator())
             for action in [WindowChromeAction.dual, .inspector, .preview, .hidden, .extensions, .checkboxes, .compact] { command(action) }
         } else {
             for action in [WindowChromeAction.commands, .rename, .cut, .copy, .paste, .trash, .share] { command(action) }
-            result.addItem(.separator()); command(.properties); command(.operations); command(.keyboard)
+            result.addItem(.separator()); command(.properties); command(.operations); command(.recovery); command(.keyboard)
         }
         return result
     }
@@ -121,7 +120,7 @@ import ExplorerCore
 enum WindowChromeAction: String, CaseIterable {
     case back, forward, up, refresh, new, newFolder, newFile, cut, copy, paste, trash, rename
     case view, details, icons, dual, inspector, preview, share, operations, properties, keyboard, more, commands
-    case hidden, extensions, checkboxes, compact
+    case hidden, extensions, checkboxes, compact, recovery
     var title: String {
         switch self {
         case .back: return "Back"; case .forward: return "Forward"; case .up: return "Enclosing Folder"; case .refresh: return "Refresh"
@@ -130,6 +129,7 @@ enum WindowChromeAction: String, CaseIterable {
         case .view: return "View and Sort"; case .details: return "Details View"; case .icons: return "Icon View"; case .dual: return "Dual Panes"
         case .inspector: return "Details Pane"; case .preview: return "Preview Pane"; case .share: return "Share"
         case .operations: return "File Operations…"; case .properties: return "Properties…"; case .keyboard: return "Keyboard and Gestures…"; case .more: return "More Actions"
+        case .recovery: return "Recovery & History…"
         case .commands: return "Command Palette…"; case .hidden: return "Hidden Items"; case .extensions: return "File Name Extensions"; case .checkboxes: return "Item Checkboxes"; case .compact: return "Compact Rows"
         }
     }
@@ -141,6 +141,7 @@ enum WindowChromeAction: String, CaseIterable {
         case .view, .icons: return "square.grid.2x2"; case .details: return "list.bullet"; case .dual: return "rectangle.split.2x1"
         case .inspector: return "sidebar.right"; case .preview: return "doc.viewfinder"; case .share: return "square.and.arrow.up"
         case .operations: return "arrow.up.arrow.down.circle"; case .properties: return "info.circle"; case .keyboard: return "keyboard"; case .more: return "ellipsis.circle"
+        case .recovery: return "clock.arrow.circlepath"
         case .commands: return "command"; case .hidden: return "eye.slash"; case .extensions: return "doc.text"; case .checkboxes: return "checkmark.square"; case .compact: return "line.3.horizontal.decrease"
         }
     }
@@ -165,7 +166,8 @@ enum WindowChromeAction: String, CaseIterable {
             case .cut: w.copy(cut: true); case .copy: w.copy(); case .paste: w.paste(); case .trash: w.delete(); case .rename: w.requestRename()
             case .details: w.current.options.view = .details; case .icons: w.current.options.view = .large
             case .dual: w.toggleDualPane(); case .inspector: w.preferences.value.inspector.toggle(); case .preview: w.preferences.value.previewPane.toggle()
-            case .operations: w.sheet = .operations; case .properties: w.sheet = .properties; case .keyboard: w.sheet = .keyboardHelp; case .commands: w.sheet = .commandPalette
+            case .operations: w.sheet = .operations; case .properties: w.sheet = .properties; case .recovery: w.sheet = .recovery
+            case .keyboard: w.sheet = .keyboardHelp; case .commands: w.sheet = .commandPalette
             case .share: if let view = w.window?.contentView { NSSharingServicePicker(items: w.selectedURLs).show(relativeTo: view.bounds, of: view, preferredEdge: .minY) }
             case .hidden: w.preferences.value.showHidden.toggle(); case .extensions: w.preferences.value.showExtensions.toggle(); case .checkboxes: w.preferences.value.checkboxes.toggle(); case .compact: w.preferences.value.compact.toggle()
             case .view, .more: break
