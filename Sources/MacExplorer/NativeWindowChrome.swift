@@ -28,7 +28,12 @@ import ExplorerCore
             for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification, NSWindow.didBecomeMainNotification] {
                 windowObservers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.refresh() } })
             }
-            let toolbar = NSToolbar(identifier: Self.identifier)
+            // autosavesConfiguration=false disables disk persistence, not AppKit's
+            // in-process synchronization of toolbars with the same identifier.
+            // Isolate nonpersistent previews/tests from each other and real windows.
+            let identifier = persistsConfiguration ? Self.identifier
+                : NSToolbar.Identifier(Self.identifier.rawValue + ".isolated." + UUID().uuidString)
+            let toolbar = NSToolbar(identifier: identifier)
             toolbar.delegate = self; toolbar.allowsUserCustomization = true
             toolbar.autosavesConfiguration = persistsConfiguration; toolbar.displayMode = .iconOnly
             self.toolbar = toolbar; window.toolbar = toolbar

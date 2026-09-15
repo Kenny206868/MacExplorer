@@ -45,6 +45,12 @@ import ExplorerCore
                     MainActor.assumeIsolated { self?.schedule(id, token: token) }
                 })
             }
+            // A sheet can detach without another key-window transition. Observe
+            // the actual end-of-sheet boundary as well, then recheck all guards
+            // on the next run-loop turn; never use an animation-duration timer.
+            action.observers.append(NotificationCenter.default.addObserver(forName: NSWindow.didEndSheetNotification, object: action.window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.schedule(id, token: token) }
+            })
             action.observers.append(NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: action.window, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.remove(id, token: token) }
             })
