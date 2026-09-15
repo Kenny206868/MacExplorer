@@ -3,7 +3,7 @@ import AppKit
 import ExplorerCore
 
 struct ExplorerCommands: Commands {
-    @FocusedObject private var workspace: ExplorerWorkspace?
+    @FocusedValue(\.explorerWorkspace) private var workspace
     @ObservedObject var updater: AppUpdater
     @ObservedObject private var sessions = WorkspaceSessionCoordinator.shared
     @ObservedObject private var operations = OperationCenter.shared
@@ -15,6 +15,7 @@ struct ExplorerCommands: Commands {
     private var canUndo: Bool { target != nil && !operations.undoStack.isEmpty && operations.runningCount == 0 && !operations.historyBusy }
     private var canRedo: Bool { target != nil && !operations.redoStack.isEmpty && operations.runningCount == 0 && !operations.historyBusy }
     private var canTransfer: Bool { guard let target else { return false }; return target.paneController?.other(than: target)?.destination != nil }
+    private func canOpenTerminal(_ scope: TerminalRequest.Scope) -> Bool { guard let target else { return false }; return (try? TerminalRequest.capture(target, scope: scope)) != nil }
     var body: some Commands {
         CommandGroup(after: .appInfo) { Button("Check for Updates…") { updater.check() }.disabled(!updater.configured || !updater.canCheck) }
         CommandGroup(replacing: .newItem) { newItems }
@@ -77,14 +78,20 @@ struct ExplorerCommands: Commands {
     @ViewBuilder private var navigationItems: some View {
         Button("Back") { target?.current.back() }.keyboardShortcut("[").disabled(target?.current.history.canGoBack != true)
         Button("Forward") { target?.current.forward() }.keyboardShortcut("]").disabled(target?.current.history.canGoForward != true)
-        Button("Up") { target?.current.up() }.keyboardShortcut(.upArrow).disabled(target?.destination == nil)
+        Button("Up") { target?.current.up() }.keyboardShortcut(.upArrow).disabled(target?.destination == nil && target?.current.location.isArchive != true)
         Divider()
         Button("Home") { target?.navigate(.home) }.keyboardShortcut("h", modifiers: [.command, .shift])
         Button("This Mac") { target?.navigate(.computer) }
-        Button("Go to Folder…") { target?.addressFocused = true }.keyboardShortcut("l")
+        Button("Edit Location") { target?.editLocation() }.keyboardShortcut("l")
+        Button("Go to Folder…") { target?.editLocation() }.keyboardShortcut("g", modifiers: [.command, .shift])
         Button("Search") { target?.searchFocused = true }.keyboardShortcut("f")
         Button("Connect to Server…") { target?.sheet = .connect }.keyboardShortcut("k")
-        Button("Open in Terminal") { if let target, let url = target.destination { NativeIntegration.terminal(url, owner: target) } }.disabled(target?.destination == nil)
+        Divider()
+        Button("Open Location in Terminal") { if let target { TerminalLauncher.shared.open(from: target) } }
+            .keyboardShortcut(.return, modifiers: [.command, .option]).disabled(!canOpenTerminal(.active))
+        Button("Open Other Pane in Terminal") { if let target { TerminalLauncher.shared.open(from: target, scope: .other) } }.disabled(!canOpenTerminal(.other))
+        Button("Open Both Panes in Terminal") { if let target { TerminalLauncher.shared.open(from: target, scope: .both) } }
+            .keyboardShortcut(.return, modifiers: [.command, .option, .shift]).disabled(!canOpenTerminal(.both))
     }
     @ViewBuilder private var viewItems: some View {
         Divider()
