@@ -8,8 +8,7 @@ struct FileGridView: View {
     @State private var marquee: CGRect?
     @State private var marqueeOrigin: CGPoint?
     @StateObject private var autoScroller = MarqueeAutoScroller()
-    @State private var baseSelection: Set<URL> = []
-    @State private var selectionMode = 0
+    @State private var selectionSession: FileMarqueeSession?
     @State private var ignoredDrag = false
     @ObservedObject private var input = InputPreferences.shared
     private var space: String { "MacExplorer.grid." + tab.id.uuidString }
@@ -20,7 +19,7 @@ struct FileGridView: View {
     var body: some View {
         ScrollViewReader { proxy in
             GeometryReader { viewport in
-                let groups = tab.groups, entries = tab.displayEntries
+                let groups = tab.groups
                 let layout = ExplorerGridGeometry(counts: groups.map { $0.1.count }, width: viewport.size.width,
                                                   minimumWidth: minimumWidth, cellHeight: itemHeight, headers: tab.options.group != .none)
                 ScrollView {
@@ -40,18 +39,21 @@ struct FileGridView: View {
                         }
                     }
                     .background(MarqueeScrollBridge(controller: autoScroller, active: marquee != nil) { point in
-                        if let origin = marqueeOrigin { updateMarquee(from: origin, to: point, layout: layout, entries: entries) }
+                        if let origin = marqueeOrigin { updateMarquee(from: origin, to: point, layout: layout) }
                     }).coordinateSpace(name: space)
                     .simultaneousGesture(DragGesture(minimumDistance: 4, coordinateSpace: .named(space))
                         .onChanged { value in
+                            guard !ignoredDrag else { return }
                             if marquee == nil {
                                 ignoredDrag = layout.index(at: value.startLocation) != nil; guard !ignoredDrag else { return }
-                                marqueeOrigin = value.startLocation; baseSelection = tab.selection
+                                marqueeOrigin = value.startLocation
                                 let flags = NSEvent.modifierFlags
-                                selectionMode = !flags.intersection([.command, .control]).isEmpty ? 2 : flags.contains(.shift) ? 1 : 0
+                                selectionSession = FileMarqueeSession(tab: tab,
+                                    mode: !flags.intersection([.command, .control]).isEmpty ? .toggle : flags.contains(.shift) ? .add : .replace)
+                                workspace.activatePane(files: true)
                             }
                             guard !ignoredDrag else { return }
-                            updateMarquee(from: value.startLocation, to: value.location, layout: layout, entries: entries)
+                            updateMarquee(from: value.startLocation, to: value.location, layout: layout)
                         }.onEnded { _ in
                             if marquee != nil { tab.selectionAnchor = tab.focusedURL }; resetMarquee()
                         })
@@ -62,19 +64,29 @@ struct FileGridView: View {
                     })
                 }.onDisappear { resetMarquee() }
                     .onAppear { tab.gridColumns = layout.columns }
-                    .onChange(of: layout.columns) { _, count in tab.gridColumns = count }
+                    .onChange(of: layout.columns) { _, count in invalidateMarquee(); tab.gridColumns = count }
                     .onChange(of: tab.focusedURL) { _, url in if marquee == nil, let url { proxy.scrollTo(url) } }
-                    .onChange(of: tab.location) { _, _ in resetMarquee() }
+                    .onChange(of: tab.location) { _, _ in invalidateMarquee() }
+                    .onChange(of: tab.presentationBuilds) { _, _ in invalidateMarquee() }
+                    .onChange(of: tab.options) { _, _ in invalidateMarquee() }
+                    .onChange(of: viewport.size.width) { _, _ in invalidateMarquee() }
+                    .onChange(of: itemHeight) { _, _ in invalidateMarquee() }
             }
         }
     }
-    private func resetMarquee() { marquee = nil; marqueeOrigin = nil; ignoredDrag = false; baseSelection = []; autoScroller.stop() }
-    private func updateMarquee(from origin: CGPoint, to point: CGPoint, layout: ExplorerGridGeometry, entries: [FileEntry]) {
+    private func invalidateMarquee() {
+        let dragging = marqueeOrigin != nil || ignoredDrag
+        resetMarquee(); ignoredDrag = dragging
+    }
+    private func resetMarquee() { marquee = nil; marqueeOrigin = nil; ignoredDrag = false; selectionSession = nil; autoScroller.stop() }
+    private func updateMarquee(from origin: CGPoint, to point: CGPoint, layout: ExplorerGridGeometry) {
         let r = CGRect(x: min(origin.x, point.x), y: min(origin.y, point.y), width: abs(point.x - origin.x), height: abs(point.y - origin.y))
         marquee = r
-        let indices = layout.indices(intersecting: r)
-        let hits = Set(indices.compactMap { entries.indices.contains($0) ? entries[$0].url : nil })
-        tab.selection = selectionMode == 2 ? baseSelection.symmetricDifference(hits) : selectionMode == 1 ? baseSelection.union(hits) : hits
-        if let index = indices.last, entries.indices.contains(index) { tab.focusedURL = entries[index].url }
+        let indices = layout.indexSet(intersecting: r)
+        switch selectionSession?.update(hits: indices) {
+        case .changed(let lastHit): if let lastHit, tab.focusedURL != lastHit { tab.focusedURL = lastHit }
+        case .invalidated: invalidateMarquee()
+        default: break
+        }
     }
 }

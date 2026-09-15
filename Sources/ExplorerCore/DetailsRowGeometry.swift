@@ -27,17 +27,18 @@ public struct DetailsRowGeometry: Sendable {
         }
         return nil
     }
-    public func indices(from a: Double, through b: Double) -> [Int] {
+    public func indices(from a: Double, through b: Double) -> [Int] { Array(indexSet(from: a, through: b)) }
+    public func indexSet(from a: Double, through b: Double) -> IndexSet {
         guard a.isFinite, b.isFinite else { return [] }
         let low = min(a, b), high = max(a, b)
         guard high > low else { return [] }
-        var result: [Int] = []
+        var result = IndexSet()
         for run in runs where run.count > 0 {
             let firstY = max(low, run.top), lastY = min(high, run.top + Double(run.count) * rowHeight)
             guard firstY < lastY else { continue }
             let first = max(0, Int(floor((firstY - run.top) / rowHeight)))
             let end = min(run.count, Int(ceil((lastY - run.top) / rowHeight)))
-            if first < end { result.append(contentsOf: (run.index + first)..<(run.index + end)) }
+            if first < end { result.insert(integersIn: (run.index + first)..<(run.index + end)) }
         }
         return result
     }
