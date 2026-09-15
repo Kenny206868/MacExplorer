@@ -2,8 +2,7 @@ import SwiftUI
 import AppKit
 import ExplorerCore
 
-/// The filename's native field editor owns taps, text selection and composition
-/// while active; the surrounding file item must not also open or start a drag.
+/// The native filename field owns taps and text selection while editing.
 struct FileActivation: ViewModifier {
     let entry: FileEntry
     let workspace: ExplorerWorkspace
@@ -16,8 +15,11 @@ struct FileActivation: ViewModifier {
     private var editingThisItem: Bool { editor.session?.source == entry.url }
     func body(content: Content) -> some View {
         content
-            .onTapGesture(count: 2) { if !editingThisItem { workspace.activateFile(entry, doubleClick: true) } }
-            .onTapGesture { if !editingThisItem { workspace.activateFile(entry) } }
+            // Native mouse-down owns single selection; it must not wait for a
+            // competing double-tap recognizer to time out.
+            .onTapGesture(count: 2) {
+                if !editingThisItem && !workspace.preferences.value.singleClickOpen { workspace.activateFile(entry, doubleClick: true) }
+            }
             .simultaneousGesture(LongPressGesture(minimumDuration: 0.65, maximumDistance: 8)
                 .onEnded { _ in if input.touchFriendly && !editingThisItem { workspace.showFileActions(for: entry) } })
     }

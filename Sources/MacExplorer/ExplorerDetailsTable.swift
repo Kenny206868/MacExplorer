@@ -90,10 +90,9 @@ private struct DetailsFileRow: View {
             HStack(spacing: 10) {
                 if preferences.value.checkboxes || workspace.touchSelecting {
                     Toggle("Select " + entry.name, isOn: Binding(get: { selected }, set: { _ in workspace.select(entry.url, extend: true, range: false) }))
-                        .labelsHidden().toggleStyle(.checkbox).frame(minWidth: input.touchFriendly ? 36 : nil, minHeight: input.touchFriendly ? 40 : nil)
+                        .labelsHidden().toggleStyle(.checkbox).background(FilePointerExclusion()).frame(minWidth: input.touchFriendly ? 36 : nil, minHeight: input.touchFriendly ? 40 : nil)
                 }
-                FileThumbnail(entry: entry, size: 20)
-                FileNameLabel(entry: entry, tab: tab)
+                FileThumbnail(entry: entry, size: 20); FileNameLabel(entry: entry, tab: tab)
                 if entry.isLocked { Image(systemName: "lock.fill").font(.system(size: 9)).foregroundStyle(ExplorerDesign.muted) }
             }
         case .modified:
@@ -123,8 +122,7 @@ private struct DetailsColumnHeader: View {
         Button(action: sort) {
             HStack(spacing: 5) {
                 Text(column.title).lineLimit(1)
-                if column.sort == tab.options.sort { Image(systemName: tab.options.descending ? "arrow.down" : "arrow.up").font(.system(size: 8)) }
-                Spacer(minLength: 0)
+                if column.sort == tab.options.sort { Image(systemName: tab.options.descending ? "arrow.down" : "arrow.up").font(.system(size: 8)) }; Spacer(minLength: 0)
             }.font(.system(size: 10)).foregroundStyle(ExplorerDesign.muted).padding(.horizontal, 12).frame(height: input.headerHeight)
                 .background(targeted ? ExplorerDesign.selection : ExplorerDesign.canvas)
         }.buttonStyle(.plain).frame(width: width)
