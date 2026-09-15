@@ -15,7 +15,7 @@ final class PathEditorTests: XCTestCase {
         })
         model.begin(text: base.path, base: base, showHidden: false)
         model.change("old"); try await Task.sleep(for: .milliseconds(130))
-        model.change("new"); try await Task.sleep(for: .milliseconds(280))
+        model.change("new"); try await waitUntil { !model.completing }
         XCTAssertEqual(model.suggestions.map(\.title), ["new"])
         var navigations = 0; model.committed = { _, _ in navigations += 1 }
         model.submit(); model.cancel(); await fulfillment(of: [finished], timeout: 2)
@@ -26,9 +26,9 @@ final class PathEditorTests: XCTestCase {
         let calls = Counter(), base = URL(fileURLWithPath: "/tmp")
         let model = PathEditorModel(resolve: { _, _, _ in throw LocationAddressError.invalid("Folder unavailable") }, complete: { _, _, _, _ in await calls.hit(); return PathSuggestions() })
         model.begin(text: "missing", base: base, showHidden: false)
-        model.acceptCompletion(); try await Task.sleep(for: .milliseconds(100))
+        model.acceptCompletion(); try await waitUntil { !model.completing }
         let count = await calls.value; XCTAssertEqual(count, 1)
-        model.submit(); try await Task.sleep(for: .milliseconds(30))
+        model.submit(); try await waitUntil { !model.resolving }
         XCTAssertTrue(model.editing); XCTAssertEqual(model.text, "missing"); XCTAssertEqual(model.error, "Folder unavailable"); model.cancel()
     }
     @MainActor func testNativeFieldSelectsFullUnicodePathAndCompletesWithoutChangingTabFocus() async throws {
@@ -40,20 +40,22 @@ final class PathEditorTests: XCTestCase {
         let window = PathTestWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 80), styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false; window.contentView = host; window.makeKeyAndOrderFront(nil)
         defer { model.cancel(); window.orderOut(nil); window.contentView = nil; window.close() }
-        try await Task.sleep(for: .milliseconds(180)); host.layoutSubtreeIfNeeded()
+        try await waitUntil { self.findField(host)?.currentEditor() is NSTextView }; host.layoutSubtreeIfNeeded()
         let field = try XCTUnwrap(findField(host)), editor = try XCTUnwrap(field.currentEditor() as? NSTextView)
-        XCTAssertEqual(editor.selectedRange(), NSRange(location: 0, length: (model.text as NSString).length))
-        model.change("Z"); try await Task.sleep(for: .milliseconds(130)); XCTAssertTrue(model.acceptCompletion())
-        try await Task.sleep(for: .milliseconds(70))
-        XCTAssertEqual(field.stringValue, base.appendingPathComponent(name).path + "/")
-        XCTAssertEqual(editor.selectedRange(), NSRange(location: (model.text as NSString).length, length: 0))
+        try await waitUntil { editor.selectedRange() == NSRange(location: 0, length: (model.text as NSString).length) }
+        model.change("Z"); try await waitUntil { !model.completing }; XCTAssertTrue(model.acceptCompletion())
+        try await waitUntil { field.stringValue == base.appendingPathComponent(name).path + "/" && editor.selectedRange() == NSRange(location: (model.text as NSString).length, length: 0) }
         XCTAssertTrue(window.firstResponder === editor)
-        model.requestFocus(selectAll: true); try await Task.sleep(for: .milliseconds(50))
-        XCTAssertEqual(editor.selectedRange().length, (model.text as NSString).length)
+        model.requestFocus(selectAll: true)
+        try await waitUntil { editor.selectedRange().length == (model.text as NSString).length }
+    }
+    @MainActor private func waitUntil(_ condition: () -> Bool) async throws {
+        let deadline = ContinuousClock.now + .seconds(3)
+        while !condition(), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(condition(), "Asynchronous UI state did not settle before the deadline")
     }
     @MainActor private func findField(_ root: NSView) -> PathTextField? {
-        if let field = root as? PathTextField { return field }
-        return root.subviews.lazy.compactMap { self.findField($0) }.first
+        if let field = root as? PathTextField { return field }; return root.subviews.lazy.compactMap { self.findField($0) }.first
     }
 }
 @MainActor private final class PathTestWindow: NSWindow { override var canBecomeKey: Bool { true } }
