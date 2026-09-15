@@ -28,26 +28,22 @@ struct FileTile: View {
             .background(selected ? ExplorerDesign.selection : hovered ? ExplorerDesign.hover.opacity(0.55) : .clear, in: RoundedRectangle(cornerRadius: 7))
             .overlay(RoundedRectangle(cornerRadius: 7).stroke(selected ? Color.accentColor.opacity(0.32) : .clear, lineWidth: 1))
             .overlay(RoundedRectangle(cornerRadius: 7).stroke(tab.focusedURL == entry.url ? Color.accentColor.opacity(0.6) : .clear, style: StrokeStyle(lineWidth: 1, dash: [3, 2])).allowsHitTesting(false))
-            .overlay(alignment: .topLeading) { checkbox }
-            .contentShape(Rectangle()).onHover { hovered = $0 }
+            .overlay(alignment: .topLeading) { checkbox }.contentShape(Rectangle()).onHover { hovered = $0 }
     }
     @ViewBuilder private var tileContent: some View {
         if horizontal {
             HStack(spacing: 12) {
-                FileArtwork(entry: entry, size: tab.options.view == .small ? 20 : 44)
-                labels(alignment: .leading); Spacer(minLength: 0)
+                FileArtwork(entry: entry, size: tab.options.view == .small ? 20 : 44); labels(alignment: .leading); Spacer(minLength: 0)
             }.padding(.horizontal, 10).frame(height: input.gridCellHeight(tab.options.view))
         } else {
-            VStack(spacing: 10) {
-                FileArtwork(entry: entry, size: CGFloat(tab.options.view.iconSize))
-                labels(alignment: .center)
-            }.padding(12).frame(maxWidth: .infinity).frame(height: CGFloat(tab.options.view.iconSize) + 63)
+            VStack(spacing: 10) { FileArtwork(entry: entry, size: CGFloat(tab.options.view.iconSize)); labels(alignment: .center) }
+                .padding(12).frame(maxWidth: .infinity).frame(height: CGFloat(tab.options.view.iconSize) + 63)
         }
     }
     @ViewBuilder private var checkbox: some View {
         if preferences.value.checkboxes || workspace.touchSelecting {
             Toggle("Select " + entry.name, isOn: Binding(get: { selected }, set: { _ in workspace.select(entry.url, extend: true, range: false) }))
-                .labelsHidden().toggleStyle(.checkbox).frame(minWidth: input.touchFriendly ? 36 : nil, minHeight: input.touchFriendly ? 36 : nil).padding(5)
+                .labelsHidden().toggleStyle(.checkbox).background(FilePointerExclusion()).frame(minWidth: input.touchFriendly ? 36 : nil, minHeight: input.touchFriendly ? 36 : nil).padding(5)
         }
     }
     private func labels(alignment: HorizontalAlignment) -> some View {
@@ -82,7 +78,7 @@ struct FileWideRow: View {
         HStack(spacing: 12) {
             if preferences.value.checkboxes || workspace.touchSelecting {
                 Toggle("Select " + entry.name, isOn: Binding(get: { selected }, set: { _ in workspace.select(entry.url, extend: true, range: false) }))
-                    .labelsHidden().toggleStyle(.checkbox).frame(minWidth: input.touchFriendly ? 36 : nil, minHeight: input.touchFriendly ? 36 : nil)
+                    .labelsHidden().toggleStyle(.checkbox).background(FilePointerExclusion()).frame(minWidth: input.touchFriendly ? 36 : nil, minHeight: input.touchFriendly ? 36 : nil)
             }
             FileArtwork(entry: entry, size: detailed ? 42 : 20)
             VStack(alignment: .leading, spacing: 5) {
