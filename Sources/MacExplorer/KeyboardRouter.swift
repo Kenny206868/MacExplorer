@@ -10,17 +10,24 @@ extension Notification.Name { static let explorerNewWindow = Notification.Name("
         // VoiceOver owns Control-Option. Never repurpose its chords.
         guard !(control && option) else { return event }
         let text = event.charactersIgnoringModifiers?.lowercased() ?? ""
+        // Composition owns Escape, Return and navigation until committed. The
+        // app must not switch panes or steal path focus from an input method.
+        if let editor = event.window?.firstResponder as? NSTextView, editor.hasMarkedText() { return event }
+        let locationShortcut = !option && ((command != control && !shift && text == "l")
+            || (command && !control && shift && text == "g")
+            || (!command && !control && !shift && event.keyCode == 118))
+        if locationShortcut {
+            if !event.isARepeat { workspace.editLocation() }
+            return nil
+        }
         if command && option && [36, 76].contains(event.keyCode) {
-            if let editor = event.window?.firstResponder as? NSTextView, editor.hasMarkedText() { return event }
             if !event.isARepeat { (terminalLauncher ?? .shared).open(from: workspace, scope: shift ? .both : .active) }
             return nil
         }
-        if command && shift && !option && text == "g" { workspace.editLocation(); return nil }
         if control && !command && event.keyCode == 48 { workspace.cycleTab(shift ? -1 : 1); return nil }
         if control && !command && (event.keyCode == 116 || event.keyCode == 121) { workspace.cycleTab(event.keyCode == 116 ? -1 : 1); return nil }
         if event.keyCode == 97 && !command && !control && !option { workspace.cycleFocus(backwards: shift); return nil }
         if (command || control) && shift && !option && text == "p" {
-            if let editor = event.window?.firstResponder as? NSTextView, editor.hasMarkedText() { return event }
             workspace.sheet = .commandPalette; return nil
         }
         let editing = event.window?.firstResponder is NSTextView || event.window?.firstResponder is NSTextField

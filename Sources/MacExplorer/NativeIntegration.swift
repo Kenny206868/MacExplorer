@@ -20,8 +20,8 @@ import ExplorerCore
         }
     }
     static func terminal(_ directory: URL, owner: ExplorerWorkspace) {
-        guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Terminal") else { owner.fail("Terminal unavailable", "Terminal.app could not be located."); return }
-        openWith([directory], application: app, owner: owner)
+        do { TerminalLauncher.shared.open(try TerminalRequest(folders: [directory]), owner: owner) }
+        catch { owner.fail("Terminal unavailable", error.localizedDescription) }
     }
     static func connect(_ address: String, owner: ExplorerWorkspace) {
         guard let url = URL(string: address), ["smb", "afp", "nfs", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil else { owner.fail("Invalid server address", "Use smb://server/share, afp://server/share, nfs://server/path, or an HTTPS WebDAV address."); return }

@@ -2,13 +2,13 @@ import AppKit
 import Combine
 import ExplorerCore
 
-/// Identifiers, never executable strings. The palette shares the guarded native
-/// actions and captures terminal targets as URLs before dismissing its sheet.
+/// Commands are identifiers, not arbitrary executable text. The palette cannot
+/// evaluate shell snippets and shares the existing filesystem operation engine.
 enum ExplorerCommand: String, CaseIterable, Identifiable {
     case goToFolder, newTab, dualPanes, openFolder, newFolder, newFile, open, rename
     case copy, cut, paste, copyPath, duplicate, trash, permanentDelete, quickLook, properties, tags, compress, archive, reveal
     case selectAll, invertSelection, clearSelection, selectMode
-    case back, forward, up, home, computer, search, refresh, terminal, terminalOther, terminalBoth, connect
+    case back, forward, up, home, computer, search, refresh, terminal, terminalBoth, connect
     case details, icons, gallery, hidden, extensions, previewPane, detailsPane, compact, touch, gestures
     case compareFolders, switchPane, copyOther, moveOther, swapPanes, equalPanes
     case reopenTab, undo, redo, operations, recovery, keyboard
@@ -47,9 +47,8 @@ enum ExplorerCommand: String, CaseIterable, Identifiable {
         case .computer: return ("This Mac", "Navigate", "desktopcomputer", "", "computer devices drives volumes")
         case .search: return ("Search Files", "Navigate", "magnifyingglass", "⌘F", "find query")
         case .refresh: return ("Refresh", "Navigate", "arrow.clockwise", "F5", "reload")
-        case .terminal: return ("Open Location in Terminal", "Navigate", "terminal", "⌥⌘↩", "shell console working directory")
-        case .terminalOther: return ("Open Other Pane in Terminal", "Panes", "terminal", "", "shell console opposite directory")
-        case .terminalBoth: return ("Open Both Panes in Terminal", "Panes", "terminal", "⇧⌥⌘↩", "shell console split directories")
+        case .terminal: return ("Open in Terminal", "Navigate", "terminal", "⌥⌘↩", "shell console active directory")
+        case .terminalBoth: return ("Open Both Panes in Terminal", "Panes", "terminal", "⇧⌥⌘↩", "shell console left right working directories")
         case .connect: return ("Connect to Server…", "Navigate", "network", "⌘K", "smb afp nfs webdav share")
         case .details: return ("Details View", "View", "list.bullet", "", "table columns rows")
         case .icons: return ("Large Icons", "View", "square.grid.2x2", "", "grid thumbnails")
@@ -62,8 +61,8 @@ enum ExplorerCommand: String, CaseIterable, Identifiable {
         case .touch: return ("Toggle Touch-friendly Controls", "Input", "hand.tap", "", "large targets tablet")
         case .gestures: return ("Toggle Trackpad Gestures", "Input", "hand.draw", "", "swipe pinch zoom")
         case .compareFolders: return ("Compare Pane Folders…", "Panes", "doc.text.magnifyingglass", "", "differences matching metadata compare directories")
-        case .switchPane: return ("Switch File Pane", "Panes", "arrow.left.arrow.right", "Tab", "focus other panel")
-        case .copyOther: return ("Copy to Other Pane", "Panes", "doc.on.doc", "⌥⌘C", "transfer destination")
+        case .switchPane: return ("Switch File Pane", "Panes", "arrow.left.arrow.right", "Tab", "focus other")
+        case .copyOther: return ("Copy to Other Pane", "Panes", "doc.on.clipboard", "⌥⌘C", "transfer destination")
         case .moveOther: return ("Move to Other Pane…", "Panes", "arrow.right.doc.on.clipboard", "⌥⌘M", "transfer confirm destination")
         case .swapPanes: return ("Swap Pane Locations", "Panes", "arrow.triangle.swap", "", "exchange left right")
         case .equalPanes: return ("Equal Pane Sizes", "Panes", "rectangle.split.2x1", "", "reset divider balance")
@@ -84,15 +83,16 @@ enum ExplorerCommand: String, CaseIterable, Identifiable {
     @MainActor func unavailable(in workspace: ExplorerWorkspace) -> String? {
         if needsFiles && workspace.selected.isEmpty { return "Select a file or folder first" }
         switch self {
-        case .paste, .newFolder, .newFile, .duplicate, .compress: if workspace.destination == nil { return "Open a filesystem folder first" }
-        case .details, .icons, .gallery: if workspace.current.location.isArchive { return "Archive members use their own file view" }
+        case .paste, .newFolder, .newFile, .duplicate, .compress, .up:
+            if workspace.destination == nil { return "Open a filesystem folder first" }
         default: break
         }
         switch self {
-        case .terminal, .terminalOther, .terminalBoth:
-            do { _ = try TerminalRequest.capture(workspace, scope: self == .terminal ? .active : self == .terminalOther ? .other : .both) }
-            catch { return error.localizedDescription }
-        case .up: if workspace.destination == nil && !workspace.current.location.isArchive { return "Open a folder or archive first" }
+        case .terminal:
+            return TerminalRequest.directory(for: workspace) == nil ? "Open a filesystem folder first" : nil
+        case .terminalBoth:
+            guard let other = workspace.paneController?.other(than: workspace) else { return "Turn on dual panes first" }
+            return TerminalRequest.directory(for: workspace) == nil || TerminalRequest.directory(for: other) == nil ? "Open a filesystem folder in both panes" : nil
         case .compareFolders: return ComparisonContext.unavailable(workspace)
         case .paste: return FileClipboard.shared.contents.urls.isEmpty ? "No files on the clipboard" : nil
         case .back: return workspace.current.history.canGoBack ? nil : "No previous location"
@@ -103,7 +103,8 @@ enum ExplorerCommand: String, CaseIterable, Identifiable {
             guard let panes = workspace.paneController else { return "Turn on dual panes first" }
             if (self == .copyOther || self == .moveOther), panes.other(than: workspace)?.destination == nil { return "Open a destination folder in the other pane" }
             if self == .swapPanes && workspace.operations.runningCount > 0 { return "Wait for active transfers to finish" }
-        case .dualPanes: if workspace.paneController != nil && workspace.operations.runningCount > 0 { return "Finish or cancel transfers before closing a pane" }
+        case .dualPanes:
+            if workspace.paneController != nil && workspace.operations.runningCount > 0 { return "Finish or cancel transfers before closing a pane" }
         case .undo, .redo:
             if workspace.operations.runningCount > 0 || workspace.operations.historyBusy { return "Wait for active file operations" }
             if self == .undo && workspace.operations.undoStack.isEmpty { return "No operation to undo" }
@@ -147,7 +148,6 @@ enum ExplorerCommand: String, CaseIterable, Identifiable {
         case .search: w.searchFocused = true
         case .refresh: w.current.refresh()
         case .terminal: TerminalLauncher.shared.open(from: w)
-        case .terminalOther: TerminalLauncher.shared.open(from: w, scope: .other)
         case .terminalBoth: TerminalLauncher.shared.open(from: w, scope: .both)
         case .connect: w.sheet = .connect
         case .details: w.current.options.view = .details
@@ -175,6 +175,7 @@ enum ExplorerCommand: String, CaseIterable, Identifiable {
         }
     }
 }
+
 @MainActor struct CommandInvocation {
     private let command: ExplorerCommand
     private weak var owner: ExplorerWorkspace?
@@ -182,15 +183,15 @@ enum ExplorerCommand: String, CaseIterable, Identifiable {
     private let location: Location
     private let files: FileActionSnapshot?
     private let clipboardGeneration: Int?
-    private let terminalRequest: TerminalRequest?
-    private var terminalScope: TerminalRequest.Scope { command == .terminalBoth ? .both : command == .terminalOther ? .other : .active }
+    private let otherTerminalTab: UUID?
+    private let otherTerminalLocation: Location?
     init(_ command: ExplorerCommand, workspace: ExplorerWorkspace) throws {
         if let reason = command.unavailable(in: workspace) { throw ExplorerError.message(reason) }
         self.command = command; owner = workspace; tabID = workspace.current.id; location = workspace.current.location
         files = command.needsFiles ? try FileActionSnapshot(workspace) : nil
         clipboardGeneration = command == .paste ? NSPasteboard.general.changeCount : nil
-        terminalRequest = [.terminal, .terminalOther, .terminalBoth].contains(command)
-            ? try TerminalRequest.capture(workspace, scope: command == .terminalBoth ? .both : command == .terminalOther ? .other : .active) : nil
+        let other = command == .terminalBoth ? workspace.paneController?.other(than: workspace) : nil
+        otherTerminalTab = other?.current.id; otherTerminalLocation = other?.current.location
     }
     func validate() throws {
         guard let owner, owner.current.id == tabID, owner.current.location == location,
@@ -198,8 +199,11 @@ enum ExplorerCommand: String, CaseIterable, Identifiable {
               clipboardGeneration == nil || clipboardGeneration == NSPasteboard.general.changeCount else {
             throw ExplorerError.message("The active pane, tab, location, or clipboard changed. Choose the command again.")
         }
-        if let terminalRequest, try TerminalRequest.capture(owner, scope: terminalScope) != terminalRequest {
-            throw ExplorerError.message("A terminal target changed while the command palette was open. Choose the command again.")
+        if let otherTerminalTab {
+            guard let other = owner.paneController?.other(than: owner), other.current.id == otherTerminalTab,
+                  other.current.location == otherTerminalLocation else {
+                throw ExplorerError.message("The other pane changed. Choose the Terminal command again.")
+            }
         }
         try files?.validate()
         if let reason = command.unavailable(in: owner) { throw ExplorerError.message(reason) }
@@ -209,6 +213,7 @@ enum ExplorerCommand: String, CaseIterable, Identifiable {
         DeferredSheetAction.shared.enqueue(for: owner, validate: validate) { [command] workspace in command.perform(in: workspace) }
     }
 }
+
 @MainActor final class CommandPaletteModel: ObservableObject {
     static let index = CommandSearch(ExplorerCommand.allCases.map { command in
         let spec = command.spec

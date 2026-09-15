@@ -9,7 +9,7 @@ struct TerminalRequest: Sendable, Equatable {
     init(folders: [URL]) throws {
         guard !folders.isEmpty, folders.count <= 2, folders.allSatisfy(\.isFileURL) else { throw ExplorerError.message("Choose one or two local or mounted folders.") }
         var seen = Set<String>()
-        self.folders = folders.map(\.standardizedFileURL).filter { seen.insert($0.path).inserted }
+        self.folders = folders.map(\.standardized).filter { seen.insert($0.path).inserted }
     }
     @MainActor static func directory(for workspace: ExplorerWorkspace) -> URL? {
         let location = workspace.current.location
