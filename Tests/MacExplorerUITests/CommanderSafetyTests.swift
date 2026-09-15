@@ -36,7 +36,7 @@ final class CommanderSafetyTests: XCTestCase {
         // A changed fingerprint will stop the move after dismissal, without
         // enqueueing any write in this lifecycle test.
         try Data("changed while confirmation was visible".utf8).write(to: fixture.files[0].url)
-        window.beginSheet(dialog)
+        window.beginSheet(dialog, completionHandler: nil)
         owner.confirmPaneTransfer()
         XCTAssertNil(owner.pendingPaneTransfer)
         try await Task.sleep(for: .milliseconds(80))
