@@ -24,7 +24,11 @@ struct FileDetailsTable: View {
                             ForEach(Array(tab.groups.enumerated()), id: \.offset) { _, group in
                                 if !group.0.isEmpty { groupHeader(group.0, count: group.1.count) }
                                 if !tab.collapsedGroups.contains(group.0) {
-                                    ForEach(group.1) { entry in DetailsFileRow(entry: entry, workspace: workspace, tab: tab, columns: visible, widths: widths).id(entry.url) }
+                                    ForEach(group.1) { entry in
+                                        DetailsFileRow(entry: entry, workspace: workspace, tab: tab, columns: visible, widths: widths,
+                                            selected: tab.selection.contains(entry.url), focused: tab.focusedURL == entry.url,
+                                            touchSelecting: workspace.touchSelecting).equatable().id(entry.url)
+                                    }
                                 }
                             }
                         } header: {
@@ -50,20 +54,28 @@ struct FileDetailsTable: View {
         }.buttonStyle(.plain).accessibilityLabel(title + ", \(count) items").accessibilityValue(tab.collapsedGroups.contains(title) ? "Collapsed" : "Expanded")
     }
 }
-private struct DetailsFileRow: View {
+private struct DetailsFileRow: View, Equatable {
     let entry: FileEntry
-    @ObservedObject var workspace: ExplorerWorkspace
-    @ObservedObject var tab: BrowserTab
+    let workspace: ExplorerWorkspace
+    let tab: BrowserTab
     let columns: [DetailsColumn]
     let widths: [Double]
     @EnvironmentObject private var preferences: PreferenceStore
     @State private var hovered = false
     @ObservedObject private var input = InputPreferences.shared
-    private var selected: Bool { tab.selection.contains(entry.url) }
+    let selected: Bool
+    let focused: Bool
+    let touchSelecting: Bool
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.entry == rhs.entry && lhs.workspace === rhs.workspace && lhs.tab === rhs.tab
+            && lhs.columns == rhs.columns && lhs.widths == rhs.widths
+            && lhs.selected == rhs.selected && lhs.focused == rhs.focused && lhs.touchSelecting == rhs.touchSelecting
+    }
     private var menuURLs: [URL] { selected ? workspace.selectedURLs : [entry.url] }
     private var rowColor: Color { selected ? ExplorerDesign.selection : hovered ? ExplorerDesign.hover.opacity(0.65) : ExplorerDesign.canvas }
     var body: some View {
-        interaction.accessibilityElement(children: .contain)
+        let _ = FileRenderDiagnostics.detailsRowBody()
+        return interaction.accessibilityElement(children: .contain)
             .accessibilityLabel(entry.name + ", " + entry.kind + ", " + entry.sizeText)
             .accessibilityAddTraits(selected ? [.isSelected, .isButton] : .isButton)
             .accessibilityAction { workspace.tapFile(entry.url, modifiers: []) }
@@ -82,13 +94,13 @@ private struct DetailsFileRow: View {
             }
         }.font(.system(size: input.fileFontSize)).frame(height: input.rowHeight(compact: preferences.value.compact))
             .background(rowColor).overlay(alignment: .bottom) { Rectangle().fill(ExplorerDesign.separator.opacity(0.42)).frame(height: 0.5) }
-            .overlay { if tab.focusedURL == entry.url { Rectangle().stroke(Color.accentColor.opacity(0.6), lineWidth: 1).padding(1).allowsHitTesting(false) } }
+            .overlay { if focused { Rectangle().stroke(Color.accentColor.opacity(0.6), lineWidth: 1).padding(1).allowsHitTesting(false) } }
     }
     @ViewBuilder private func cell(_ column: DetailsColumn) -> some View {
         switch column {
         case .name:
             HStack(spacing: 10) {
-                if preferences.value.checkboxes || workspace.touchSelecting {
+                if preferences.value.checkboxes || touchSelecting {
                     Toggle("Select " + entry.name, isOn: Binding(get: { selected }, set: { _ in workspace.select(entry.url, extend: true, range: false) }))
                         .labelsHidden().toggleStyle(.checkbox).background(FilePointerExclusion()).frame(minWidth: input.touchFriendly ? 36 : nil, minHeight: input.touchFriendly ? 40 : nil)
                 }

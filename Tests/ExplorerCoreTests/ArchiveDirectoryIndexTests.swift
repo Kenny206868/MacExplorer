@@ -34,6 +34,11 @@ final class ArchiveDirectoryIndexTests: XCTestCase {
         XCTAssertThrowsError(try ArchiveDirectoryIndex(members: [member("a"), member("a")]))
         XCTAssertThrowsError(try ArchiveDirectoryIndex(members: [], checkingCancellation: { throw CancellationError() }))
     }
+    func testImplicitNamespaceExpansionHasAHardMemoryBudget() {
+        XCTAssertThrowsError(try ArchiveDirectoryIndex(members: [member("a/b/c/d/file.txt")], maximumNodes: 3))
+        XCTAssertThrowsError(try ArchiveDirectoryIndex(members: [member("a"), member("b")], maximumNodes: 1))
+        XCTAssertNoThrow(try ArchiveDirectoryIndex(members: [], maximumNodes: 0))
+    }
     func testRepeatedLargeArchiveNavigationDoesNotEnumerateMembersAgain() throws {
         let members = (0..<50_000).map { member("Folder\($0 / 100)/file\($0).txt") }
         var checkpoints = 0

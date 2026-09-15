@@ -1,0 +1,9 @@
+# Large-directory rendering and input validation
+
+The Details row no longer observes every publication of the entire tab and workspace. Its selected/focused/touch state is passed as values through an equatable boundary. Unchanged rows retain their view/thumbnail/editor state; selection changes update the affected rows. Column layout, appearance, input density, hover, filename-edit sessions and real file metadata still invalidate the views that need them.
+
+`LargeDirectoryScrollTests` creates 2,000 ordinary files in a disposable directory, uses the production asynchronous BrowserTab listing and SwiftUI Details surface in a real NSWindow, and scrolls its actual NSScrollView. The test asserts bounded live row anchors, localized row-body evaluations and no extra filesystem listing or presentation-sort starts during input. Native NSEvent key-downs exercise the production keyboard router. It records median, p95 and maximum key-dispatch, selection-layout and scroll-layout durations in `large-directory-performance.json` beside the PNG gallery.
+
+These are DEBUG shared-runner diagnostics, not an FPS advertisement. Programmatic scroll/layout timings do not measure physical input-to-photon latency, GPU completion or presentation cadence. The structural assertions are hard CI gates; timing samples are evidence for comparing exact commits and for deciding what to profile on representative 60/120 Hz Macs, network mounts and File Providers. No screenshot-only test is presented as proof of buttery-smooth real-device performance.
+
+Native snapshot, selection, rename, column, clipboard and drag tests continue to cover the same production row after this observation change. The original reference palette and interaction semantics are preserved. File-operation journaling and metadata/provider permission boundaries are unchanged.

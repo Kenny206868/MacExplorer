@@ -8,8 +8,9 @@ public struct ArchiveDirectoryIndex: Sendable {
     public let hasEncryption: Bool
     public let hasUnsupportedMembers: Bool
 
-    public init(members: [ArchiveMember], checkingCancellation: () throws -> Void = {}) throws {
+    public init(members: [ArchiveMember], maximumNodes: Int = 200_000, checkingCancellation: () throws -> Void = {}) throws {
         try checkingCancellation()
+        guard maximumNodes >= members.count else { throw ExplorerError.message("Archive namespace exceeds the index memory budget.") }
         var nodes: [String: ArchiveMember] = [:]
         nodes.reserveCapacity(members.count)
         var encrypted = false, unsupported = false
@@ -31,6 +32,7 @@ public struct ArchiveDirectoryIndex: Sendable {
                 if let node = nodes[parent] {
                     guard node.isDirectory else { throw ExplorerError.message("An archive file is also a parent folder: " + parent) }
                 } else {
+                    guard nodes.count < maximumNodes else { throw ExplorerError.message("Archive namespace exceeds the index memory budget.") }
                     nodes[parent] = ArchiveMember(path: parent, isDirectory: true, size: 0,
                         encrypted: false, modified: nil, unsupportedReason: nil)
                 }
