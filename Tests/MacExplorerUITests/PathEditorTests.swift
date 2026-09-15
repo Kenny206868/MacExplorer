@@ -53,7 +53,7 @@ final class PathEditorTests: XCTestCase {
     }
     @MainActor private func findField(_ root: NSView) -> PathTextField? {
         if let field = root as? PathTextField { return field }
-        return root.subviews.lazy.compactMap { findField($0) }.first
+        return root.subviews.lazy.compactMap { self.findField($0) }.first
     }
 }
 @MainActor private final class PathTestWindow: NSWindow { override var canBecomeKey: Bool { true } }
