@@ -139,13 +139,18 @@ public enum FileNames {
         return a.count >= b.count && Array(a.prefix(b.count)) == b
     }
     public static func independentRoots(_ urls: [URL]) -> [URL] {
-        let unique = Array(Set(urls.map(\.standardizedFileURL))).sorted { $0.pathComponents.count < $1.pathComponents.count }
-        var result: [URL] = []
-        for url in unique {
-            if !result.contains(where: { parent in
-                guard (try? parent.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true else { return false }
-                return isDescendant(url, of: parent)
-            }) { result.append(url) }
+        // Preserve canonical-path and symlink-root semantics, but resolve each
+        // candidate only once. The former all-pairs loop repeatedly performed
+        // filesystem reads and canonicalization for every selected sibling.
+        let unique = Set(urls.map(\.standardizedFileURL)).map { ($0, $0.pathComponents.count) }
+            .sorted { $0.1 < $1.1 }
+        var result: [URL] = [], index = PathPrefixIndex()
+        result.reserveCapacity(unique.count)
+        for (url, _) in unique {
+            let canonical = url.resolvingSymlinksInPath().pathComponents
+            guard !index.containsAncestor(of: canonical) else { continue }
+            result.append(url)
+            if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true { index.insert(canonical) }
         }
         return result
     }
