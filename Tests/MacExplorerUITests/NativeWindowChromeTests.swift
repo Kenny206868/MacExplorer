@@ -61,7 +61,7 @@ final class NativeWindowChromeTests: XCTestCase {
         try encoder.encode(captures).write(to: output.appendingPathComponent("window-captures.json"), options: .atomic)
         XCTAssertEqual(captures.count, 6)
     }
-    @MainActor func testToolbarLocationTracksPaneFocusAndRetainsCustomization() async throws {
+    @MainActor func testToolbarLocationTracksPaneFocusAndRetainsCustomization() throws {
         _ = NSApplication.shared
         let root = ExplorerWorkspace(session: BrowserSession(id: UUID(), history: NavigationHistory(.home), options: FolderOptions(), query: "", allLocations: false, selection: []))
         root.current.stop()

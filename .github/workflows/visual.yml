@@ -15,6 +15,7 @@ jobs:
     env:
       TZ: UTC
       LANG: en_US.UTF-8
+      SWIFT_BACKTRACE: enable=yes,interactive=no,threads=all
       MACEXPLORER_SNAPSHOT_DIR: ${{ github.workspace }}/artifacts/native-views
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -45,6 +46,30 @@ jobs:
           set -o pipefail
           python3 -m unittest discover -s scripts -p 'test_performance_validation.py' -v
           python3 scripts/validate-performance.py "$PERFORMANCE_DIR" --commit "$GITHUB_SHA" 2>&1 | tee "$PERFORMANCE_DIR/validation.log"
+      - name: Retain native crash reports and toolchain diagnostics
+        if: failure()
+        run: |
+          mkdir -p "$MACEXPLORER_SNAPSHOT_DIR/diagnostics"
+          swift --version > "$MACEXPLORER_SNAPSHOT_DIR/diagnostics/toolchain.txt" 2>&1
+          sw_vers >> "$MACEXPLORER_SNAPSHOT_DIR/diagnostics/toolchain.txt"
+          python3 - <<'PYDIAG'
+          import os, pathlib, shutil, time
+          destination = pathlib.Path(os.environ['MACEXPLORER_SNAPSHOT_DIR']) / 'diagnostics'
+          source = pathlib.Path.home() / 'Library/Logs/DiagnosticReports'
+          reports = []
+          if source.is_dir():
+              for path in source.iterdir():
+                  if path.is_symlink() or not path.is_file() or path.suffix not in ('.ips', '.crash'):
+                      continue
+                  if not path.name.lower().startswith(('xctest', 'macexplorer')):
+                      continue
+                  info = path.stat()
+                  if info.st_size <= 5_000_000 and time.time() - info.st_mtime < 7200:
+                      reports.append((info.st_mtime, path))
+          for _, path in sorted(reports, reverse=True)[:8]:
+              shutil.copy2(path, destination / path.name)
+          print(f'Retained {min(len(reports), 8)} recent XCTest/application crash reports.')
+          PYDIAG
       - name: Upload native PNGs, timing evidence, test log, and offline review gallery
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
