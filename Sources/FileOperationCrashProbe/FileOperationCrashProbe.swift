@@ -29,13 +29,16 @@ import Glibc
         let root = URL(fileURLWithPath: args[0]).standardizedFileURL
         guard root.lastPathComponent.hasPrefix("MacExplorer-EngineCrash-"),
               root.deletingLastPathComponent().resolvingSymlinksInPath().path == FileManager.default.temporaryDirectory.resolvingSymlinksInPath().standardizedFileURL.path,
-              ["copy", "move", "rename", "create", "undo"].contains(args[1]) else { _exit(64) }
+              ["copy", "move", "rename", "create", "undo", "archive"].contains(args[1]) else { _exit(64) }
         do {
             let trigger = Trigger(point: point, ordinal: ordinal, armed: args[1] != "undo")
             let engine = FileOperationEngine(recoveryDirectory: root.appendingPathComponent("receipts"), journalFault: { trigger.hit($0) })
             let source = root.appendingPathComponent("from/file.txt"), destination = root.appendingPathComponent("to")
             let result: FileJobResult
             switch args[1] {
+            case "archive":
+                let archive = root.appendingPathComponent("sample.zip")
+                result = await engine.editArchive(archive, expected: try FileFingerprint(archive), mutation: .rename(path: "docs", to: "manual"), control: OperationControl())
             case "rename": result = await engine.rename([(root.appendingPathComponent("a.txt"), "b.txt"), (root.appendingPathComponent("b.txt"), "a.txt")], control: OperationControl())
             case "create": result = await engine.run(FileJob(.createFolder, destination: destination.appendingPathComponent("New Folder")), control: OperationControl(), progress: { _ in }, resolve: { _ in CollisionAnswer(.cancel) })
             case "undo":

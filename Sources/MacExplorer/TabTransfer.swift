@@ -3,8 +3,6 @@ import AppKit
 
 extension Notification.Name { static let explorerDetachTab = Notification.Name("MacExplorer.detachTab") }
 
-/// Tabs are live objects, not filesystem payloads. Random in-process tickets
-/// never contain paths and can be consumed only once by this coordinator.
 @MainActor final class TabTransferCoordinator {
     static let shared = TabTransferCoordinator()
     static let type = "com.wieslawsoltes.macexplorer.tab"
@@ -36,8 +34,7 @@ extension Notification.Name { static let explorerDetachTab = Notification.Name("
               source.window?.attachedSheet == nil, target.window?.attachedSheet == nil,
               source.conflict == nil, target.conflict == nil else { return false }
         self.ticket = nil
-        target.receiveTab(from: source, id: ticket.tabID, before: tab); target.activatePane()
-        return true
+        target.receiveTab(from: source, id: ticket.tabID, before: tab); target.activatePane(); return true
     }
     func drop(_ providers: [NSItemProvider], into target: ExplorerWorkspace, before tab: UUID?) -> Bool {
         guard let provider = providers.first(where: { $0.hasItemConformingToTypeIdentifier(Self.type) }), ticket != nil else { return false }
@@ -48,8 +45,6 @@ extension Notification.Name { static let explorerDetachTab = Notification.Name("
         return true
     }
     func end(operation: NSDragOperation, released: Bool, outside: Bool, point: CGPoint) {
-        // Only an unambiguous mouse release outside app windows requests a new
-        // window. Escape, failed internal drops and unknown end causes cancel.
         guard operation.isEmpty else { return }
         defer { ticket = nil }
         guard released, outside, let ticket, let source = ticket.source,
@@ -63,17 +58,12 @@ extension Notification.Name { static let explorerDetachTab = Notification.Name("
         detachments[session.id] = request
         NotificationCenter.default.post(name: .explorerDetachTab, object: request)
         Task { @MainActor in
-            try? await Task.sleep(for: .seconds(15))
-            self.detachments.removeValue(forKey: session.id)
+            try? await Task.sleep(for: .seconds(15)); self.detachments.removeValue(forKey: session.id)
             self.arrivals = self.arrivals.filter { $0.value != session.id }
         }
         return session
     }
-    func restored(_ session: UUID, as tab: BrowserTab) {
-        if detachments[session] != nil { arrivals[tab.id] = session }
-    }
-    /// The source is removed only after the new native window has arrived.
-    /// Failed window creation leaves the original tab and all its state intact.
+    func restored(_ session: UUID, as tab: BrowserTab) { if detachments[session] != nil { arrivals[tab.id] = session } }
     func completeArrival(in target: ExplorerWorkspace) {
         guard let placeholder = target.tabs.first(where: { arrivals[$0.id] != nil }),
               let id = arrivals.removeValue(forKey: placeholder.id), let request = detachments.removeValue(forKey: id),
@@ -90,21 +80,16 @@ extension Notification.Name { static let explorerDetachTab = Notification.Name("
     }
     func cancel() { ticket = nil }
 }
-
 struct TabDetachmentHost: ViewModifier {
     @ObservedObject var workspace: ExplorerWorkspace
     @Environment(\.openWindow) private var openWindow
     func body(content: Content) -> some View {
         content.onReceive(NotificationCenter.default.publisher(for: .explorerDetachTab)) { notification in
-            guard let request = notification.object as? TabTransferCoordinator.Detachment,
-                  request.sourceWindowID == workspace.id else { return }
+            guard let request = notification.object as? TabTransferCoordinator.Detachment, request.sourceWindowID == workspace.id else { return }
             openWindow(id: "detached", value: request.session)
-        }.onAppear {
-            Task { @MainActor in await Task.yield(); TabTransferCoordinator.shared.completeArrival(in: workspace) }
-        }
+        }.onAppear { Task { @MainActor in await Task.yield(); TabTransferCoordinator.shared.completeArrival(in: workspace) } }
     }
 }
-
 struct TabDragAnchor: NSViewRepresentable {
     let tab: BrowserTab
     let workspace: ExplorerWorkspace
@@ -133,8 +118,7 @@ struct TabDragAnchor: NSViewRepresentable {
     func draggingSession(_ session: NSDraggingSession, endedAt point: NSPoint, operation: NSDragOperation) {
         let released = NSApp.currentEvent?.type == .leftMouseUp && NSEvent.pressedMouseButtons & 1 == 0
         let outside = !NSApp.windows.contains { $0.isVisible && !$0.isMiniaturized && $0.frame.contains(point) }
-        TabTransferCoordinator.shared.end(operation: operation, released: released, outside: outside, point: point)
-        TabDragRouter.shared.end()
+        TabTransferCoordinator.shared.end(operation: operation, released: released, outside: outside, point: point); TabDragRouter.shared.end()
     }
 }
 @MainActor final class TabDragRouter {
@@ -150,19 +134,15 @@ struct TabDragAnchor: NSViewRepresentable {
             let handled = MainActor.assumeIsolated { self.handle(event) }; return handled ? nil : event
         }
     }
-    func unregister(_ view: TabDragAnchorView) {
-        anchors.remove(view); if candidate === view { candidate = nil; down = nil }; clean()
-    }
+    func unregister(_ view: TabDragAnchorView) { anchors.remove(view); if candidate === view { candidate = nil; down = nil }; clean() }
     func end() { active = nil; candidate = nil; down = nil; clean() }
-    private func clean() {
-        if anchors.allObjects.isEmpty, active == nil, let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
-    }
+    private func clean() { if anchors.allObjects.isEmpty, active == nil, let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil } }
     private func handle(_ event: NSEvent) -> Bool {
         switch event.type {
         case .leftMouseDown:
             candidate = nil; down = nil
-            guard event.window?.attachedSheet == nil else { return false }
-            candidate = anchors.allObjects.first { $0.window === event.window && !$0.isHiddenOrHasHiddenAncestor && $0.visibleRect.contains($0.convert(event.locationInWindow, from: nil)) }
+            guard event.window != nil, event.window?.attachedSheet == nil else { return false }
+            candidate = anchors.allObjects.first { $0.window === event.window && !$0.isHiddenOrHasHiddenAncestor && $0.inputHitRect.contains($0.convert(event.locationInWindow, from: nil)) }
             if candidate != nil { down = event }
         case .leftMouseDragged:
             guard active == nil, let candidate, let down, candidate.window === event.window,
@@ -176,16 +156,12 @@ struct TabDragAnchor: NSViewRepresentable {
         return false
     }
 }
-
 struct TabDropTarget: ViewModifier {
     let workspace: ExplorerWorkspace
     let before: UUID?
     @State private var targeted = false
     func body(content: Content) -> some View {
-        content.onDrop(of: [TabTransferCoordinator.type], isTargeted: $targeted) {
-            TabTransferCoordinator.shared.drop($0, into: workspace, before: before)
-        }.overlay(alignment: .leading) {
-            if targeted { Capsule().fill(Color.accentColor).frame(width: 3).padding(.vertical, 5).allowsHitTesting(false) }
-        }
+        content.onDrop(of: [TabTransferCoordinator.type], isTargeted: $targeted) { TabTransferCoordinator.shared.drop($0, into: workspace, before: before) }
+            .overlay(alignment: .leading) { if targeted { Capsule().fill(Color.accentColor).frame(width: 3).padding(.vertical, 5).allowsHitTesting(false) } }
     }
 }

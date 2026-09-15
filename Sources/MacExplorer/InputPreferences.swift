@@ -28,9 +28,8 @@ import ExplorerCore
     }
     func activateFile(_ entry: FileEntry, doubleClick: Bool = false, modifiers: NSEvent.ModifierFlags = NSEvent.modifierFlags) {
         guard current.navigation.order.contains(entry.url) else { return }
-        if doubleClick {
-            guard !touchSelecting else { return }; activatePane(files: true); open(entry)
-        } else {
+        if doubleClick { guard !touchSelecting else { return }; activatePane(files: true); open(entry) }
+        else {
             tapFile(entry.url, modifiers: modifiers)
             if preferences.value.singleClickOpen && !touchSelecting && modifiers.intersection([.command, .control, .shift]).isEmpty { open(entry) }
         }
@@ -46,7 +45,9 @@ import ExplorerCore
         current.options.view = modes[min(modes.count - 1, max(0, index + (direction < 0 ? -1 : 1)))]
     }
     func focusFileSurface() {
-        addressFocused = false; searchFocused = false; fileSurfaceFocused = true; window?.makeFirstResponder(nil)
+        if addressFocused { addressFocused = false }; if searchFocused { searchFocused = false }
+        fileSurfaceFocused = true
+        if let window, window.firstResponder !== window { window.makeFirstResponder(nil) }
     }
     func cycleFocus(backwards: Bool) {
         let index = addressFocused ? 0 : searchFocused ? 1 : 2

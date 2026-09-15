@@ -26,6 +26,7 @@ private struct PreparedBrowserListing: Sendable {
         refreshPending = false; activeRequest = nil; spotlight.stop()
     }
     func scheduleSearch() {
+        guard !location.isArchive else { return }
         cancelLoading(); let expected = generation
         searchDebounce = Task { [weak self] in
             do { try await Task.sleep(for: .milliseconds(260)) } catch { return }
@@ -45,6 +46,12 @@ private struct PreparedBrowserListing: Sendable {
         }
     }
     func refresh() {
+        if location.isArchive {
+            cancelLoading(); watcher.stop(); projectionTask?.cancel(); projectionTask = nil
+            entries = []; selection = []; loading = false; error = nil; warnings = []; truncated = false
+            archiveRevision &+= 1; return
+        }
+        archiveItemCount = 0; archiveSelectionCount = 0
         let preferences = PreferenceStore.shared.value
         let request = BrowserReadRequest(location: location, query: query, allLocations: allLocations,
             showHidden: preferences.showHidden, recursive: preferences.recursiveSearch)
@@ -111,7 +118,7 @@ private struct PreparedBrowserListing: Sendable {
                             catch { if combined.warnings.count < 20 { combined.warnings.append(error.localizedDescription) } }
                         }
                         snapshot = combined
-                    case .computer, .network, .tag: snapshot = DirectorySnapshot()
+                    case .computer, .network, .tag, .archive: snapshot = DirectorySnapshot()
                     }
                 }
                 try await self.installRead(snapshot, generation: expected, sequence: sequence,

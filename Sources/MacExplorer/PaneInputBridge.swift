@@ -37,7 +37,7 @@ struct PaneInputBridge: NSViewRepresentable {
     func workspace(at point: NSPoint, in window: NSWindow?) -> ExplorerWorkspace? {
         guard let window else { return nil }
         return regions.allObjects.first { view in
-            view.window === window && !view.isHiddenOrHasHiddenAncestor && view.visibleRect.contains(view.convert(point, from: nil))
+            view.window === window && !view.isHiddenOrHasHiddenAncestor && view.inputHitRect.contains(view.convert(point, from: nil))
         }?.workspace
     }
     func handle(_ event: NSEvent) -> NSEvent? {

@@ -13,6 +13,9 @@ import ExplorerCore
     @Published var query = "" { didSet { if query != oldValue { scheduleSearch() } } }
     @Published var allLocations = false { didSet { if allLocations != oldValue { scheduleSearch() } } }
     @Published var loading = false
+    @Published var archiveRevision = 0
+    @Published var archiveItemCount = 0
+    @Published var archiveSelectionCount = 0
     @Published var error: String?
     @Published var warnings: [String] = []
     @Published var truncated = false
@@ -111,5 +114,10 @@ import ExplorerCore
     }
     func back() { if history.canGoBack { stop(); history.back(); query = ""; resetSelection(); options = PreferenceStore.shared.folderOptions(location); refresh() } }
     func forward() { if history.canGoForward { stop(); history.forward(); query = ""; resetSelection(); options = PreferenceStore.shared.folderOptions(location); refresh() } }
-    func up() { if let directory = location.directory, directory.path != "/" { navigate(.folder(directory.deletingLastPathComponent())) } else { navigate(.computer) } }
+    func up() {
+        if case .archive(let source, let folder) = location {
+            navigate(folder.isEmpty ? .folder(source.deletingLastPathComponent()) : .archive(source, folder: folder.split(separator: "/").dropLast().joined(separator: "/")))
+        } else if let directory = location.directory, directory.path != "/" { navigate(.folder(directory.deletingLastPathComponent())) }
+        else { navigate(.computer) }
+    }
 }

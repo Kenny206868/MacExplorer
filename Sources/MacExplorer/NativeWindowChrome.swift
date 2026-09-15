@@ -2,8 +2,8 @@ import SwiftUI
 import AppKit
 import ExplorerCore
 
-/// Standard window controls and customizable native symbol/menu toolbar items.
-/// The file browsers and every application-created panel remain SwiftUI.
+/// Native window identity changes only when its visible state changes, not on
+/// every selection/focus publication from a file row.
 @MainActor final class NativeWindowChrome: NSObject, NSToolbarDelegate, NSToolbarItemValidation, NSMenuItemValidation, NSMenuDelegate {
     static let identifier = NSToolbar.Identifier("MacExplorer.FileToolbar.v2")
     var persistsConfiguration = true
@@ -11,15 +11,16 @@ import ExplorerCore
     private weak var installedWindow: NSWindow?
     private var toolbar: NSToolbar?
     private var windowObservers: [NSObjectProtocol] = []
+    private var lastAvailability: [Bool]?
+    private(set) var chromeMutationCount = 0
+    private(set) var validationPasses = 0
     func attach(to window: NSWindow, owner: ExplorerWorkspace) {
         self.owner = owner
         if installedWindow !== window {
             windowObservers.forEach(NotificationCenter.default.removeObserver); windowObservers = []
-            installedWindow = window
+            installedWindow = window; lastAvailability = nil
             for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification, NSWindow.didBecomeMainNotification] {
-                windowObservers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
-                    MainActor.assumeIsolated { self?.refresh() }
-                })
+                windowObservers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.refresh() } })
             }
             let toolbar = NSToolbar(identifier: Self.identifier)
             toolbar.delegate = self; toolbar.allowsUserCustomization = true
@@ -35,29 +36,31 @@ import ExplorerCore
     func refresh() {
         guard let root = owner, let window = installedWindow else { return }
         let workspace = root.routedWorkspace, location = workspace.current.location
-        window.title = location.title
-        window.subtitle = root.dualPane == nil ? "MacExplorer" : (workspace.parentWorkspace == nil ? "Left pane" : "Right pane") + " · MacExplorer"
-        window.representedURL = location.directory; window.isDocumentEdited = false
-        switch root.preferences.value.theme {
-        case "dark": window.appearance = NSAppearance(named: .darkAqua)
-        case "light": window.appearance = NSAppearance(named: .aqua)
-        default: window.appearance = nil
-        }
-        toolbar?.validateVisibleItems()
+        let title = location.title
+        let subtitle = root.dualPane == nil ? "MacExplorer" : (workspace.parentWorkspace == nil ? "Left pane" : "Right pane") + " · MacExplorer"
+        let represented = location.archiveSource ?? location.directory
+        if window.title != title { window.title = title; chromeMutationCount += 1 }
+        if window.subtitle != subtitle { window.subtitle = subtitle; chromeMutationCount += 1 }
+        if window.representedURL != represented { window.representedURL = represented; chromeMutationCount += 1 }
+        if window.isDocumentEdited { window.isDocumentEdited = false; chromeMutationCount += 1 }
+        let name: NSAppearance.Name? = root.preferences.value.theme == "dark" ? .darkAqua : root.preferences.value.theme == "light" ? .aqua : nil
+        if window.appearance?.name != name { window.appearance = name.flatMap(NSAppearance.init(named:)); chromeMutationCount += 1 }
+        let available = WindowChromeAction.allCases.map { $0.enabled(for: root) }
+        if lastAvailability != available { lastAvailability = available; toolbar?.validateVisibleItems(); validationPasses += 1 }
     }
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.init("back"), .init("forward"), .flexibleSpace, .init("new"), .init("copy"), .init("paste"), .init("view"), .init("dual"), .init("inspector"), .init("more")]
+        [.init("back"), .init("forward"), .flexibleSpace, .init("new"), .init("copy"), .init("paste"), .init("view"), .init("dual"), .init("terminal"), .init("inspector"), .init("more")]
     }
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { WindowChromeAction.allCases.map { .init($0.rawValue) } + [.flexibleSpace, .space] }
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier identifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
         guard let action = WindowChromeAction(rawValue: identifier.rawValue) else { return nil }
+        lastAvailability = nil
         let item: NSToolbarItem
         if action.isMenu { let menuItem = NSMenuToolbarItem(itemIdentifier: identifier); menuItem.menu = menu(action); item = menuItem }
         else { item = NSToolbarItem(itemIdentifier: identifier); item.target = self; item.action = #selector(invokeToolbar(_:)) }
         item.label = action.title; item.paletteLabel = action.title; item.toolTip = action.title
         item.image = NSImage(systemSymbolName: action.symbol, accessibilityDescription: action.title); item.image?.isTemplate = true
-        item.isBordered = false
-        item.isNavigational = action == .back || action == .forward || action == .up
+        item.isBordered = false; item.isNavigational = action == .back || action == .forward || action == .up
         let overflow = NSMenuItem(title: action.title, action: #selector(invokeMenu(_:)), keyEquivalent: "")
         overflow.target = self; overflow.representedObject = action.rawValue
         if action.isMenu { overflow.submenu = menu(action) }; item.menuFormRepresentation = overflow
@@ -67,13 +70,14 @@ import ExplorerCore
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         guard let key = item.representedObject as? String else { return true }
         if let action = WindowChromeAction(rawValue: key) { return action.enabled(for: owner) }
-        return WorkspaceCommandScope.target(owner) != nil
+        guard let workspace = WorkspaceCommandScope.target(owner) else { return false }; return !workspace.current.location.isArchive
     }
     @objc private func invokeToolbar(_ item: NSToolbarItem) { WindowChromeAction(rawValue: item.itemIdentifier.rawValue)?.perform(on: owner) }
     @objc private func invokeMenu(_ item: NSMenuItem) {
         guard let key = item.representedObject as? String else { return }
         if let action = WindowChromeAction(rawValue: key) { action.perform(on: owner); return }
         WorkspaceCommandScope.perform(on: owner) { workspace in
+            guard !workspace.current.location.isArchive else { return }
             if key.hasPrefix("view:"), let mode = ViewMode(rawValue: String(key.dropFirst(5))) { workspace.current.options.view = mode }
             else if key.hasPrefix("sort:"), let field = SortField(rawValue: String(key.dropFirst(5))) { workspace.current.options.sort = field }
             else if key.hasPrefix("group:"), let field = GroupField(rawValue: String(key.dropFirst(6))) { workspace.current.options.group = field }
@@ -111,7 +115,7 @@ import ExplorerCore
             for action in [WindowChromeAction.dual, .inspector, .preview, .hidden, .extensions, .checkboxes, .compact] { command(action) }
         } else {
             for action in [WindowChromeAction.commands, .rename, .cut, .copy, .paste, .trash, .share] { command(action) }
-            result.addItem(.separator()); command(.properties); command(.operations); command(.recovery); command(.keyboard)
+            result.addItem(.separator()); command(.terminal); command(.properties); command(.operations); command(.recovery); command(.keyboard)
         }
         return result
     }
@@ -120,7 +124,7 @@ import ExplorerCore
 enum WindowChromeAction: String, CaseIterable {
     case back, forward, up, refresh, new, newFolder, newFile, cut, copy, paste, trash, rename
     case view, details, icons, dual, inspector, preview, share, operations, properties, keyboard, more, commands
-    case hidden, extensions, checkboxes, compact, recovery
+    case hidden, extensions, checkboxes, compact, recovery, terminal
     var title: String {
         switch self {
         case .back: return "Back"; case .forward: return "Forward"; case .up: return "Enclosing Folder"; case .refresh: return "Refresh"
@@ -129,7 +133,7 @@ enum WindowChromeAction: String, CaseIterable {
         case .view: return "View and Sort"; case .details: return "Details View"; case .icons: return "Icon View"; case .dual: return "Dual Panes"
         case .inspector: return "Details Pane"; case .preview: return "Preview Pane"; case .share: return "Share"
         case .operations: return "File Operations…"; case .properties: return "Properties…"; case .keyboard: return "Keyboard and Gestures…"; case .more: return "More Actions"
-        case .recovery: return "Recovery & History…"
+        case .recovery: return "Recovery & History…"; case .terminal: return "Open Location in Terminal (⌥⌘↩)"
         case .commands: return "Command Palette…"; case .hidden: return "Hidden Items"; case .extensions: return "File Name Extensions"; case .checkboxes: return "Item Checkboxes"; case .compact: return "Compact Rows"
         }
     }
@@ -141,7 +145,7 @@ enum WindowChromeAction: String, CaseIterable {
         case .view, .icons: return "square.grid.2x2"; case .details: return "list.bullet"; case .dual: return "rectangle.split.2x1"
         case .inspector: return "sidebar.right"; case .preview: return "doc.viewfinder"; case .share: return "square.and.arrow.up"
         case .operations: return "arrow.up.arrow.down.circle"; case .properties: return "info.circle"; case .keyboard: return "keyboard"; case .more: return "ellipsis.circle"
-        case .recovery: return "clock.arrow.circlepath"
+        case .recovery: return "clock.arrow.circlepath"; case .terminal: return "terminal"
         case .commands: return "command"; case .hidden: return "eye.slash"; case .extensions: return "doc.text"; case .checkboxes: return "checkmark.square"; case .compact: return "line.3.horizontal.decrease"
         }
     }
@@ -149,10 +153,11 @@ enum WindowChromeAction: String, CaseIterable {
     @MainActor func enabled(for root: ExplorerWorkspace?) -> Bool {
         guard let w = WorkspaceCommandScope.target(root) else { return false }
         switch self {
-        case .back: return w.current.history.canGoBack
-        case .forward: return w.current.history.canGoForward
-        case .up: return w.destination != nil
+        case .back: return w.current.history.canGoBack; case .forward: return w.current.history.canGoForward
+        case .up: return w.destination != nil || w.current.location.isArchive
         case .newFolder, .newFile, .paste: return w.destination != nil
+        case .terminal: return TerminalRequest.directory(for: w) != nil
+        case .details, .icons: return !w.current.location.isArchive
         case .copy, .cut, .trash, .rename, .properties, .share: return !w.selected.isEmpty
         default: return true
         }
@@ -167,6 +172,7 @@ enum WindowChromeAction: String, CaseIterable {
             case .details: w.current.options.view = .details; case .icons: w.current.options.view = .large
             case .dual: w.toggleDualPane(); case .inspector: w.preferences.value.inspector.toggle(); case .preview: w.preferences.value.previewPane.toggle()
             case .operations: w.sheet = .operations; case .properties: w.sheet = .properties; case .recovery: w.sheet = .recovery
+            case .terminal: TerminalLauncher.shared.open(from: w)
             case .keyboard: w.sheet = .keyboardHelp; case .commands: w.sheet = .commandPalette
             case .share: if let view = w.window?.contentView { NSSharingServicePicker(items: w.selectedURLs).show(relativeTo: view.bounds, of: view, preferredEdge: .minY) }
             case .hidden: w.preferences.value.showHidden.toggle(); case .extensions: w.preferences.value.showExtensions.toggle(); case .checkboxes: w.preferences.value.checkboxes.toggle(); case .compact: w.preferences.value.compact.toggle()

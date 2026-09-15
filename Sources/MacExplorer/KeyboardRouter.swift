@@ -3,19 +3,31 @@ import ExplorerCore
 
 extension Notification.Name { static let explorerNewWindow = Notification.Name("MacExplorer.newWindow") }
 @MainActor enum KeyboardRouter {
-    static func handle(_ event: NSEvent) -> NSEvent? {
+    static func handle(_ event: NSEvent, terminalLauncher: TerminalLauncher? = nil) -> NSEvent? {
         guard let workspace = WorkspaceCommandScope.target(AppRouter.shared.active), event.window === workspace.window else { return event }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let control = flags.contains(.control), command = flags.contains(.command), shift = flags.contains(.shift), option = flags.contains(.option)
-        // VoiceOver owns Control-Option. Option-only character composition also
-        // passes through except for the documented Explorer navigation chords.
+        // VoiceOver owns Control-Option. Never repurpose its chords.
         guard !(control && option) else { return event }
         let text = event.charactersIgnoringModifiers?.lowercased() ?? ""
+        // Composition owns Escape, Return and navigation until committed. The
+        // app must not switch panes or steal path focus from an input method.
+        if let editor = event.window?.firstResponder as? NSTextView, editor.hasMarkedText() { return event }
+        let locationShortcut = !option && ((command != control && !shift && text == "l")
+            || (command && !control && shift && text == "g")
+            || (!command && !control && !shift && event.keyCode == 118))
+        if locationShortcut {
+            if !event.isARepeat { workspace.editLocation() }
+            return nil
+        }
+        if command && option && [36, 76].contains(event.keyCode) {
+            if !event.isARepeat { (terminalLauncher ?? .shared).open(from: workspace, scope: shift ? .both : .active) }
+            return nil
+        }
         if control && !command && event.keyCode == 48 { workspace.cycleTab(shift ? -1 : 1); return nil }
         if control && !command && (event.keyCode == 116 || event.keyCode == 121) { workspace.cycleTab(event.keyCode == 116 ? -1 : 1); return nil }
         if event.keyCode == 97 && !command && !control && !option { workspace.cycleFocus(backwards: shift); return nil }
         if (command || control) && shift && !option && text == "p" {
-            if let editor = event.window?.firstResponder as? NSTextView, editor.hasMarkedText() { return event }
             workspace.sheet = .commandPalette; return nil
         }
         let editing = event.window?.firstResponder is NSTextView || event.window?.firstResponder is NSTextField
@@ -42,8 +54,25 @@ extension Notification.Name { static let explorerNewWindow = Notification.Name("
             case 124: workspace.current.forward(); return nil
             case 126: workspace.current.up(); return nil
             case 36, 76: if !workspace.selected.isEmpty { workspace.sheet = .properties }; return nil
-            default: if text == "d" { workspace.addressFocused = true; return nil }; return event
+            default: if text == "d" { workspace.editLocation(); return nil }; return event
             }
+        }
+        if workspace.current.location.isArchive {
+            if event.keyCode == 120 && !command && !control && !option { NotificationCenter.default.post(name: .archiveRenameRequested, object: workspace.current.id); return nil }
+            if event.keyCode == 96 && !command && !control && !option { workspace.current.refresh(); return nil }
+            if event.keyCode == 51 && !command && !control && !option { workspace.current.up(); return nil }
+            if control && !command {
+                switch text {
+                case "f": workspace.searchFocused = true; return nil
+                case "l": workspace.editLocation(); return nil
+                case "t": if shift { workspace.reopenClosedTab() } else { workspace.newTab() }; return nil
+                case "w": workspace.closeTab(workspace.activeID); return nil
+                case "z": workspace.operations.undo(redo: shift); return nil
+                case "y": workspace.operations.undo(redo: true); return nil
+                default: break
+                }
+            }
+            return event // Native archive Table owns its virtual member input.
         }
         if control && !command {
             if [123, 124, 125, 126, 115, 119].contains(event.keyCode) {
@@ -60,7 +89,7 @@ extension Notification.Name { static let explorerNewWindow = Notification.Name("
             case "y": workspace.operations.undo(redo: true)
             case "t": if shift { workspace.reopenClosedTab() } else { workspace.newTab() }
             case "w": workspace.closeTab(workspace.activeID)
-            case "l": workspace.addressFocused = true
+            case "l": workspace.editLocation()
             case "f": if shift { workspace.current.allLocations = true }; workspace.searchFocused = true
             case "n":
                 if shift { if workspace.destination != nil { workspace.sheet = .newFolder } }
@@ -75,7 +104,7 @@ extension Notification.Name { static let explorerNewWindow = Notification.Name("
         case 122: workspace.sheet = .keyboardHelp; return nil
         case 120: workspace.requestRename(); return nil
         case 99: workspace.searchFocused = true; return nil
-        case 118: workspace.addressFocused = true; return nil
+        case 118: workspace.editLocation(); return nil
         case 96: workspace.current.refresh(); return nil
         case 109 where shift: if !workspace.selected.isEmpty { workspace.sheet = .fileActions }; return nil
         default: break

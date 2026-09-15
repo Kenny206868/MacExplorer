@@ -14,7 +14,10 @@ import ExplorerCore
         NSApp.setActivationPolicy(.regular); NSApp.servicesProvider = self; NSUpdateDynamicServices()
         let arguments = CommandLine.arguments.dropFirst().filter { !$0.hasPrefix("-") }
         AppRouter.shared.pending += arguments.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
-        keyboardMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in MainActor.assumeIsolated { KeyboardRouter.handle(event) } }
+        keyboardMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let consumed = MainActor.assumeIsolated { KeyboardRouter.handle(event) == nil }
+            return consumed ? nil : event
+        }
         NSApp.activate(ignoringOtherApps: true)
     }
     func application(_ sender: NSApplication, openFiles filenames: [String]) {

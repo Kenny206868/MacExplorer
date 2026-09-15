@@ -1,15 +1,17 @@
 import SwiftUI
 import AppKit
+import ExplorerCore
 
-struct FileActionSheet: View {
+struct TouchFileActions: View {
     @ObservedObject var workspace: ExplorerWorkspace
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack {
-                VStack(alignment: .leading, spacing: 5) {
+                Image(systemName: "hand.tap").font(.title2).foregroundStyle(Color.accentColor)
+                VStack(alignment: .leading, spacing: 3) {
                     Text("File actions").font(.title2.weight(.semibold))
-                    Text("\(workspace.selected.count) selected · " + workspace.current.location.title).font(.callout).foregroundStyle(ExplorerDesign.muted)
+                    Text("\(workspace.selected.count) selected in \(workspace.current.location.title)").font(.callout).foregroundStyle(ExplorerDesign.muted)
                 }
                 Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
             }
@@ -44,6 +46,10 @@ struct KeyboardHelpView: View {
     @Environment(\.dismiss) private var dismiss
     private let shortcuts: [(String, String)] = [
         ("Cmd/Ctrl + Shift + P", "Search and run commands"),
+        ("Cmd/Ctrl + L · Cmd + Shift + G", "Edit or reselect the entire folder path"),
+        ("Tab · Cmd + Return", "Complete path / Open path in a new tab"),
+        ("Cmd + Option + Return", "Open active location in Terminal"),
+        ("Cmd + Shift + Option + Return", "Open both pane locations in Terminal"),
         ("Cmd/Ctrl + Shift + D", "Toggle dual-pane browsing"),
         ("Tab / Shift + Tab", "Switch between file panes"),
         ("Cmd + Option + C", "Copy selected files to the other pane"),

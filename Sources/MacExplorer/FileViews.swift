@@ -14,7 +14,9 @@ struct ExplorerContent: View {
     }
     private var content: some View {
         Group {
-            if tab.query.isEmpty && tab.location == .home { HomeView(workspace: workspace, tab: tab) }
+            if case .archive(let source, let folder) = tab.location {
+                ArchiveLocationView(workspace: workspace, tab: tab, source: source, folder: folder).id(source)
+            } else if tab.query.isEmpty && tab.location == .home { HomeView(workspace: workspace, tab: tab) }
             else if tab.query.isEmpty && tab.location == .computer { ComputerView(workspace: workspace) }
             else if tab.query.isEmpty && tab.location == .network { NetworkView(workspace: workspace) }
             else if tab.entries.isEmpty && !tab.loading {

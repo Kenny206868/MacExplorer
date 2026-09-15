@@ -111,7 +111,7 @@ import ExplorerCore
     }
     func confirmDeletion() { let urls = pendingDeletion; pendingDeletion = []; operations.submit(FileJob(permanentDeletion ? .delete : .trash, sources: urls), owner: self) }
     func compress() { guard !selectedURLs.isEmpty, let destination else { return }; operations.submit(FileJob(.compress, sources: selectedURLs, destination: destination), owner: self) }
-    func extract() { guard !selectedURLs.isEmpty else { return }; sheet = .archive }
+    func extract() { guard let source = selectedURLs.first else { return }; navigate(.archive(source, folder: "")) }
     func alias() { guard let destination else { return }; operations.submit(FileJob(.symbolicLink, sources: selectedURLs, destination: destination, names: Dictionary(uniqueKeysWithValues: selectedURLs.map { ($0.path, $0.lastPathComponent + " link") })), owner: self) }
     func quickLook() { current.previewURL = selectedURLs.first }
     func fail(_ title: String, _ text: String) { activatePane(); message = MessageBox(title: title, message: text) }
@@ -127,7 +127,6 @@ import ExplorerCore
     func drop(_ providers: [NSItemProvider], to folder: URL, move: Bool) -> Bool {
         let accepted = providers.filter { $0.hasItemConformingToTypeIdentifier("public.file-url") }
         guard !accepted.isEmpty else { return false }
-        // The destination and owning pane are captured before asynchronous loads.
         let destinationIdentity = try? FileFingerprint(folder)
         Task {
             var urls: [URL] = []

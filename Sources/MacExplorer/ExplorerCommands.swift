@@ -81,10 +81,15 @@ struct ExplorerCommands: Commands {
         Divider()
         Button("Home") { target?.navigate(.home) }.keyboardShortcut("h", modifiers: [.command, .shift])
         Button("This Mac") { target?.navigate(.computer) }
-        Button("Go to Folder…") { target?.addressFocused = true }.keyboardShortcut("l")
+        Button("Go to Folder…") { target?.editLocation() }.keyboardShortcut("l")
         Button("Search") { target?.searchFocused = true }.keyboardShortcut("f")
         Button("Connect to Server…") { target?.sheet = .connect }.keyboardShortcut("k")
-        Button("Open in Terminal") { if let target, let url = target.destination { NativeIntegration.terminal(url, owner: target) } }.disabled(target?.destination == nil)
+        Button("Open in Terminal") { if let target { TerminalLauncher.shared.open(from: target) } }
+            .keyboardShortcut(.return, modifiers: [.command, .option])
+            .disabled(target.map { TerminalRequest.directory(for: $0) == nil } ?? true)
+        Button("Open Both Panes in Terminal") { if let target { TerminalLauncher.shared.open(from: target, scope: .both) } }
+            .keyboardShortcut(.return, modifiers: [.command, .option, .shift])
+            .disabled(target.map { ExplorerCommand.terminalBoth.unavailable(in: $0) != nil } ?? true)
     }
     @ViewBuilder private var viewItems: some View {
         Divider()

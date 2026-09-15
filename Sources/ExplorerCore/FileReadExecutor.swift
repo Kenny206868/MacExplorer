@@ -25,25 +25,26 @@ public final class FileReadExecutor: @unchecked Sendable {
         queue = OperationQueue(); queue.name = "MacExplorer.read." + name
         queue.maxConcurrentOperationCount = max(1, min(8, concurrency)); queue.qualityOfService = quality
     }
+    /// Diagnostic snapshot including queued and executing reads.
+    var outstandingReadCount: Int { queue.operationCount }
     public func run<T: Sendable>(_ work: @escaping @Sendable (FileReadCancellation) throws -> T) async throws -> T {
         try Task.checkCancellation()
-        let job = ReadCompletion<T>()
+        let job = ReadOperation<T>(work: work)
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 guard job.install(continuation) else { return }
-                queue.addOperation {
-                    let result: Result<T, Error> = Result {
-                        try job.cancellation.check()
-                        let value = try work(job.cancellation)
-                        try job.cancellation.check(); return value
-                    }
-                    job.complete(result)
-                }
+                queue.addOperation(job)
             }
         } onCancel: { job.cancel() }
     }
 }
-private final class ReadCompletion<T: Sendable>: @unchecked Sendable {
+/// An enqueued operation owns its read closure only until it starts or is
+/// cancelled. Cancelling a caller must not retain an obsolete large listing
+/// behind a stalled filesystem call. Running calls remain cooperative.
+private final class ReadOperation<T: Sendable>: Operation, @unchecked Sendable {
+    typealias Work = @Sendable (FileReadCancellation) throws -> T
+    private var work: Work?
+    init(work: @escaping Work) { self.work = work; super.init() }
     let cancellation = FileReadCancellation()
     private let lock = NSLock()
     private var continuation: CheckedContinuation<T, Error>?
@@ -53,11 +54,33 @@ private final class ReadCompletion<T: Sendable>: @unchecked Sendable {
         if completed { lock.unlock(); continuation.resume(throwing: CancellationError()); return false }
         self.continuation = continuation; lock.unlock(); return true
     }
-    func cancel() { cancellation.cancel(); complete(.failure(CancellationError())) }
+    override func main() {
+        lock.lock()
+        let read = completed ? nil : work
+        work = nil
+        lock.unlock()
+        guard let read else { return }
+        complete(Result {
+            try cancellation.check()
+            let value = try read(cancellation)
+            try cancellation.check()
+            return value
+        })
+    }
+    override func cancel() {
+        cancellation.cancel()
+        super.cancel()
+        complete(.failure(CancellationError()))
+    }
     func complete(_ result: Result<T, Error>) {
         lock.lock()
         guard !completed else { lock.unlock(); return }
         completed = true; let callback = continuation; continuation = nil
-        lock.unlock(); callback?.resume(with: result)
+        // Captured objects may have reentrant destructors. Release the closure
+        // after unlocking, just like resuming the continuation.
+        let discardedWork = work; work = nil
+        lock.unlock()
+        withExtendedLifetime(discardedWork) {}
+        callback?.resume(with: result)
     }
 }

@@ -8,7 +8,7 @@ enum ExplorerCommand: String, CaseIterable, Identifiable {
     case goToFolder, newTab, dualPanes, openFolder, newFolder, newFile, open, rename
     case copy, cut, paste, copyPath, duplicate, trash, permanentDelete, quickLook, properties, tags, compress, archive, reveal
     case selectAll, invertSelection, clearSelection, selectMode
-    case back, forward, up, home, computer, search, refresh, terminal, connect
+    case back, forward, up, home, computer, search, refresh, terminal, terminalOther, terminalBoth, connect
     case details, icons, gallery, hidden, extensions, previewPane, detailsPane, compact, touch, gestures
     case compareFolders, switchPane, copyOther, moveOther, swapPanes, equalPanes
     case reopenTab, undo, redo, operations, recovery, keyboard
@@ -47,7 +47,9 @@ enum ExplorerCommand: String, CaseIterable, Identifiable {
         case .computer: return ("This Mac", "Navigate", "desktopcomputer", "", "computer devices drives volumes")
         case .search: return ("Search Files", "Navigate", "magnifyingglass", "⌘F", "find query")
         case .refresh: return ("Refresh", "Navigate", "arrow.clockwise", "F5", "reload")
-        case .terminal: return ("Open in Terminal", "Navigate", "terminal", "", "shell console")
+        case .terminal: return ("Open in Terminal", "Navigate", "terminal", "⌥⌘↩", "shell console active directory")
+        case .terminalOther: return ("Open Other Pane in Terminal", "Panes", "terminal", "", "shell console opposite directory")
+        case .terminalBoth: return ("Open Both Panes in Terminal", "Panes", "terminal", "⇧⌥⌘↩", "shell console left right working directories")
         case .connect: return ("Connect to Server…", "Navigate", "network", "⌘K", "smb afp nfs webdav share")
         case .details: return ("Details View", "View", "list.bullet", "", "table columns rows")
         case .icons: return ("Large Icons", "View", "square.grid.2x2", "", "grid thumbnails")
@@ -60,8 +62,8 @@ enum ExplorerCommand: String, CaseIterable, Identifiable {
         case .touch: return ("Toggle Touch-friendly Controls", "Input", "hand.tap", "", "large targets tablet")
         case .gestures: return ("Toggle Trackpad Gestures", "Input", "hand.draw", "", "swipe pinch zoom")
         case .compareFolders: return ("Compare Pane Folders…", "Panes", "doc.text.magnifyingglass", "", "differences matching metadata compare directories")
-        case .switchPane: return ("Switch File Pane", "Panes", "arrow.left.arrow.right", "Tab", "focus other panel")
-        case .copyOther: return ("Copy to Other Pane", "Panes", "doc.on.doc", "⌥⌘C", "transfer destination")
+        case .switchPane: return ("Switch File Pane", "Panes", "arrow.left.arrow.right", "Tab", "focus other")
+        case .copyOther: return ("Copy to Other Pane", "Panes", "doc.on.clipboard", "⌥⌘C", "transfer destination")
         case .moveOther: return ("Move to Other Pane…", "Panes", "arrow.right.doc.on.clipboard", "⌥⌘M", "transfer confirm destination")
         case .swapPanes: return ("Swap Pane Locations", "Panes", "arrow.triangle.swap", "", "exchange left right")
         case .equalPanes: return ("Equal Pane Sizes", "Panes", "rectangle.split.2x1", "", "reset divider balance")
@@ -82,11 +84,22 @@ enum ExplorerCommand: String, CaseIterable, Identifiable {
     @MainActor func unavailable(in workspace: ExplorerWorkspace) -> String? {
         if needsFiles && workspace.selected.isEmpty { return "Select a file or folder first" }
         switch self {
-        case .paste, .newFolder, .newFile, .duplicate, .compress, .up, .terminal:
+        case .paste, .newFolder, .newFile, .duplicate, .compress:
             if workspace.destination == nil { return "Open a filesystem folder first" }
+        case .up:
+            if workspace.destination == nil && !workspace.current.location.isArchive { return "Open a folder or archive first" }
+        case .details, .icons, .gallery:
+            if workspace.current.location.isArchive { return "Archive members use their own file view" }
         default: break
         }
         switch self {
+        case .terminal:
+            return TerminalRequest.directory(for: workspace) == nil ? "Open a filesystem folder first" : nil
+        case .terminalOther:
+            if (try? TerminalRequest.capture(workspace, scope: .other)) == nil { return "Open a filesystem folder in the other pane" }
+        case .terminalBoth:
+            guard let other = workspace.paneController?.other(than: workspace) else { return "Turn on dual panes first" }
+            return TerminalRequest.directory(for: workspace) == nil || TerminalRequest.directory(for: other) == nil ? "Open a filesystem folder in both panes" : nil
         case .compareFolders: return ComparisonContext.unavailable(workspace)
         case .paste: return FileClipboard.shared.contents.urls.isEmpty ? "No files on the clipboard" : nil
         case .back: return workspace.current.history.canGoBack ? nil : "No previous location"
@@ -109,7 +122,7 @@ enum ExplorerCommand: String, CaseIterable, Identifiable {
     }
     @MainActor func perform(in w: ExplorerWorkspace) {
         switch self {
-        case .goToFolder: w.addressFocused = true
+        case .goToFolder: w.editLocation()
         case .newTab: w.newTab()
         case .dualPanes: w.toggleDualPane()
         case .openFolder: NativeIntegration.chooseFolder(owner: w)
@@ -141,7 +154,9 @@ enum ExplorerCommand: String, CaseIterable, Identifiable {
         case .computer: w.navigate(.computer)
         case .search: w.searchFocused = true
         case .refresh: w.current.refresh()
-        case .terminal: if let url = w.destination { NativeIntegration.terminal(url, owner: w) }
+        case .terminal: TerminalLauncher.shared.open(from: w)
+        case .terminalOther: TerminalLauncher.shared.open(from: w, scope: .other)
+        case .terminalBoth: TerminalLauncher.shared.open(from: w, scope: .both)
         case .connect: w.sheet = .connect
         case .details: w.current.options.view = .details
         case .icons: w.current.options.view = .large
@@ -176,17 +191,27 @@ enum ExplorerCommand: String, CaseIterable, Identifiable {
     private let location: Location
     private let files: FileActionSnapshot?
     private let clipboardGeneration: Int?
+    private let otherTerminalTab: UUID?
+    private let otherTerminalLocation: Location?
     init(_ command: ExplorerCommand, workspace: ExplorerWorkspace) throws {
         if let reason = command.unavailable(in: workspace) { throw ExplorerError.message(reason) }
         self.command = command; owner = workspace; tabID = workspace.current.id; location = workspace.current.location
         files = command.needsFiles ? try FileActionSnapshot(workspace) : nil
         clipboardGeneration = command == .paste ? NSPasteboard.general.changeCount : nil
+        let other = (command == .terminalBoth || command == .terminalOther) ? workspace.paneController?.other(than: workspace) : nil
+        otherTerminalTab = other?.current.id; otherTerminalLocation = other?.current.location
     }
     func validate() throws {
         guard let owner, owner.current.id == tabID, owner.current.location == location,
               owner.windowRoot.routedWorkspace === owner,
               clipboardGeneration == nil || clipboardGeneration == NSPasteboard.general.changeCount else {
             throw ExplorerError.message("The active pane, tab, location, or clipboard changed. Choose the command again.")
+        }
+        if let otherTerminalTab {
+            guard let other = owner.paneController?.other(than: owner), other.current.id == otherTerminalTab,
+                  other.current.location == otherTerminalLocation else {
+                throw ExplorerError.message("The other pane changed. Choose the Terminal command again.")
+            }
         }
         try files?.validate()
         if let reason = command.unavailable(in: owner) { throw ExplorerError.message(reason) }

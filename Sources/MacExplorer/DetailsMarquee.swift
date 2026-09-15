@@ -9,8 +9,7 @@ struct DetailsMarquee: ViewModifier {
     let entries: [FileEntry]
     @State private var rectangle: CGRect?
     @State private var origin: CGPoint?
-    @State private var baseline: Set<URL> = []
-    @State private var mode = 0
+    @State private var selectionSession: FileMarqueeSession?
     @State private var ignored = false
     @StateObject private var scroll = MarqueeAutoScroller()
     private var space: String { "details-selection." + tab.id.uuidString }
@@ -28,9 +27,10 @@ struct DetailsMarquee: ViewModifier {
                 if origin == nil && !ignored {
                     ignored = value.startLocation.y < geometry.headerHeight || geometry.index(at: value.startLocation.y) != nil
                     guard !ignored else { return }
-                    origin = value.startLocation; baseline = tab.selection
+                    origin = value.startLocation
                     let flags = NSEvent.modifierFlags
-                    mode = !flags.intersection([.command, .control]).isEmpty ? 2 : flags.contains(.shift) ? 1 : 0
+                    selectionSession = FileMarqueeSession(tab: tab,
+                        mode: !flags.intersection([.command, .control]).isEmpty ? .toggle : flags.contains(.shift) ? .add : .replace)
                     workspace.activatePane(files: true)
                 }
                 guard !ignored, let origin else { return }; update(from: origin, to: value.location)
@@ -40,16 +40,24 @@ struct DetailsMarquee: ViewModifier {
                     tab.selection = []; tab.focusedURL = nil; tab.selectionAnchor = nil
                 }
             })
-            .onDisappear { finish() }.onChange(of: tab.location) { _, _ in finish() }
+            .onDisappear { finish() }.onChange(of: tab.location) { _, _ in invalidate() }
+            .onChange(of: tab.presentationBuilds) { _, _ in invalidate() }
+            .onChange(of: tab.options) { _, _ in invalidate() }
+            .onChange(of: tab.collapsedGroups) { _, _ in invalidate() }
+            .onChange(of: geometry.rowHeight) { _, _ in invalidate() }
+            .onChange(of: geometry.headerHeight) { _, _ in invalidate() }
     }
     private func update(from origin: CGPoint, to point: CGPoint) {
         rectangle = CGRect(x: min(origin.x, point.x), y: min(origin.y, point.y), width: abs(point.x - origin.x), height: abs(point.y - origin.y))
-        let indices = geometry.indices(from: origin.y, through: point.y)
-        let hits = Set(indices.compactMap { entries.indices.contains($0) ? entries[$0].url : nil })
-        tab.selection = mode == 2 ? baseline.symmetricDifference(hits) : mode == 1 ? baseline.union(hits) : hits
+        let indices = geometry.indexSet(from: origin.y, through: point.y)
+        if case .invalidated = selectionSession?.update(hits: indices) { invalidate() }
+    }
+    private func invalidate() {
+        let dragging = origin != nil || ignored
+        rectangle = nil; origin = nil; selectionSession = nil; ignored = dragging; scroll.stop()
     }
     private func finish() {
-        if rectangle != nil { tab.selectionAnchor = entries.first(where: { tab.selection.contains($0.url) })?.url; tab.focusedURL = tab.selectionAnchor }
-        rectangle = nil; origin = nil; baseline = []; ignored = false; scroll.stop()
+        if rectangle != nil { tab.selectionAnchor = tab.selectedEntries.first?.url; tab.focusedURL = tab.selectionAnchor }
+        rectangle = nil; origin = nil; selectionSession = nil; ignored = false; scroll.stop()
     }
 }

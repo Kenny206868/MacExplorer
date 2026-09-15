@@ -46,8 +46,6 @@ struct FileDragAnchor: NSViewRepresentable {
     }
     func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation { context == .withinApplication ? [.copy, .move, .link] : .copy }
     func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
-        // The receiver commits changes. A Move mask never authorizes the source
-        // to delete its files a second time.
         FileDragRouter.shared.endSession(); tab?.refresh()
     }
 }
@@ -78,23 +76,22 @@ struct FileDragAnchor: NSViewRepresentable {
         guard let window else { return nil }
         return anchors.allObjects.first { view in
             view.window === window && view.workspace === workspace && !view.isHiddenOrHasHiddenAncestor
-                && view.visibleRect.contains(view.convert(point, from: nil))
+                && view.inputHitRect.contains(view.convert(point, from: nil))
                 && view.url.flatMap { workspace.current.navigation.order.index(of: $0) }.map { workspace.current.navigation.entries[$0].canBrowse } == true
         }?.url
     }
     func endSession() { activeSource = nil; candidate = nil; downEvent = nil; if anchors.allObjects.isEmpty { removeMonitor() } }
     private func removeMonitor() { if let monitor { NSEvent.removeMonitor(monitor) }; monitor = nil }
-    /// Select before ordinary dispatch, without a double-click recognition
-    /// delay. Editors and checkboxes own their input. Multi-drag keeps sources.
     func handle(_ event: NSEvent) -> NSEvent? {
+        guard event.window != nil else { return event }
         switch event.type {
         case .leftMouseDown:
             candidate = nil; downEvent = nil; preserveSelectionUntilUp = false
             guard event.window?.attachedSheet == nil,
-                  !exclusions.allObjects.contains(where: { $0.window === event.window && !$0.isHiddenOrHasHiddenAncestor && $0.visibleRect.contains($0.convert(event.locationInWindow, from: nil)) }) else { return event }
+                  !exclusions.allObjects.contains(where: { $0.window === event.window && !$0.isHiddenOrHasHiddenAncestor && $0.inputHitRect.contains($0.convert(event.locationInWindow, from: nil)) }) else { return event }
             candidate = anchors.allObjects.first { view in
-                view.window === event.window && !view.isHiddenOrHasHiddenAncestor && !view.isEditingFilename
-                    && view.visibleRect.contains(view.convert(event.locationInWindow, from: nil))
+                view.window === event.window && !view.isHiddenOrHasHiddenAncestor
+                    && view.inputHitRect.contains(view.convert(event.locationInWindow, from: nil)) && !view.isEditingFilename
             }
             candidateURL = candidate?.url
             if let candidate, let url = candidate.url, let workspace = candidate.workspace,
@@ -116,8 +113,8 @@ struct FileDragAnchor: NSViewRepresentable {
             if candidate.begin(downEvent) { return nil }; activeSource = nil; self.downEvent = nil
         case .leftMouseUp:
             if let candidate, let downEvent, let workspace = candidate.workspace, let url = candidate.url,
-               candidate.url == candidateURL, candidate.window === event.window, !candidate.isEditingFilename,
-               candidate.visibleRect.contains(candidate.convert(event.locationInWindow, from: nil)),
+               candidate.url == candidateURL, candidate.window === event.window, candidate.tab === workspace.current, !candidate.isEditingFilename,
+               candidate.inputHitRect.contains(candidate.convert(event.locationInWindow, from: nil)),
                WorkspaceCommandScope.target(workspace) != nil,
                hypot(event.locationInWindow.x - downEvent.locationInWindow.x, event.locationInWindow.y - downEvent.locationInWindow.y) < 5 {
                 if preserveSelectionUntilUp { workspace.select(url, extend: false, range: false) }
