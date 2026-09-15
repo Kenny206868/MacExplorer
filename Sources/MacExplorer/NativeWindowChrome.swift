@@ -37,7 +37,7 @@ import ExplorerCore
         let workspace = root.routedWorkspace, location = workspace.current.location
         window.title = location.title
         window.subtitle = root.dualPane == nil ? "MacExplorer" : (workspace.parentWorkspace == nil ? "Left pane" : "Right pane") + " · MacExplorer"
-        window.representedURL = location.directory; window.isDocumentEdited = false
+        window.representedURL = location.archiveSource ?? location.directory; window.isDocumentEdited = false
         switch root.preferences.value.theme {
         case "dark": window.appearance = NSAppearance(named: .darkAqua)
         case "light": window.appearance = NSAppearance(named: .aqua)
@@ -67,13 +67,15 @@ import ExplorerCore
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         guard let key = item.representedObject as? String else { return true }
         if let action = WindowChromeAction(rawValue: key) { return action.enabled(for: owner) }
-        return WorkspaceCommandScope.target(owner) != nil
+        guard let workspace = WorkspaceCommandScope.target(owner) else { return false }
+        return !workspace.current.location.isArchive
     }
     @objc private func invokeToolbar(_ item: NSToolbarItem) { WindowChromeAction(rawValue: item.itemIdentifier.rawValue)?.perform(on: owner) }
     @objc private func invokeMenu(_ item: NSMenuItem) {
         guard let key = item.representedObject as? String else { return }
         if let action = WindowChromeAction(rawValue: key) { action.perform(on: owner); return }
         WorkspaceCommandScope.perform(on: owner) { workspace in
+            guard !workspace.current.location.isArchive else { return }
             if key.hasPrefix("view:"), let mode = ViewMode(rawValue: String(key.dropFirst(5))) { workspace.current.options.view = mode }
             else if key.hasPrefix("sort:"), let field = SortField(rawValue: String(key.dropFirst(5))) { workspace.current.options.sort = field }
             else if key.hasPrefix("group:"), let field = GroupField(rawValue: String(key.dropFirst(6))) { workspace.current.options.group = field }
@@ -151,8 +153,9 @@ enum WindowChromeAction: String, CaseIterable {
         switch self {
         case .back: return w.current.history.canGoBack
         case .forward: return w.current.history.canGoForward
-        case .up: return w.destination != nil
+        case .up: return w.destination != nil || w.current.location.isArchive
         case .newFolder, .newFile, .paste: return w.destination != nil
+        case .details, .icons: return !w.current.location.isArchive
         case .copy, .cut, .trash, .rename, .properties, .share: return !w.selected.isEmpty
         default: return true
         }

@@ -2,8 +2,7 @@ import SwiftUI
 import AppKit
 import ExplorerCore
 
-/// Each pane's actual path remains visible, even when shared chrome follows the
-/// other pane. Inline editing is a native text field with its own focus lifetime.
+/// Each pane's path remains visible even while shared chrome follows the other.
 struct PaneLocationBar: View {
     @ObservedObject var workspace: ExplorerWorkspace
     @ObservedObject private var input = InputPreferences.shared
@@ -12,6 +11,7 @@ struct PaneLocationBar: View {
     @FocusState private var focused: Bool
     private var location: Location { workspace.current.location }
     private var displayPath: String {
+        if location.isArchive { return location.displayPath }
         guard let url = location.directory else { return location.title }
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         if url.path == home { return "~" }
@@ -30,18 +30,19 @@ struct PaneLocationBar: View {
                 Button(action: edit) {
                     Text(displayPath).lineLimit(1).truncationMode(.middle).frame(maxWidth: .infinity, alignment: .leading)
                         .frame(height: input.touchFriendly ? 40 : 27).contentShape(Rectangle())
-                }.buttonStyle(.plain).help("Edit location: " + (location.directory?.path ?? location.title))
-                    .accessibilityLabel("Edit pane location, " + displayPath)
+                }.buttonStyle(.plain).help("Edit location: " + displayPath).accessibilityLabel("Edit pane location, " + displayPath)
             }
             Menu {
                 Button("Edit Location", action: edit)
+                if let archive = location.archiveSource {
+                    Button("Reveal Archive") { NSWorkspace.shared.activateFileViewerSelecting([archive]) }
+                    Button("Open in New Tab") { workspace.newTab(location) }
+                }
                 if let url = location.directory {
                     Button("Copy Path") { NativeIntegration.copyPaths([url]) }
                     Button("Open in New Tab") { workspace.newTab(.folder(url)) }
                     Divider()
-                    ForEach(parents, id: \.self) { parent in
-                        Button(parent.path == "/" ? "Macintosh HD" : parent.lastPathComponent) { workspace.navigate(.folder(parent)) }
-                    }
+                    ForEach(parents, id: \.self) { parent in Button(parent.path == "/" ? "Macintosh HD" : parent.lastPathComponent) { workspace.navigate(.folder(parent)) } }
                 }
             } label: { Image(systemName: "chevron.down").font(.system(size: 8)).frame(width: input.touchFriendly ? 40 : 22, height: input.touchFriendly ? 40 : 27) }
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).accessibilityLabel("Pane location actions")
@@ -60,7 +61,7 @@ struct PaneLocationBar: View {
     }
     private func edit() {
         workspace.activatePane(); workspace.fileSurfaceFocused = false
-        address = location.directory?.path ?? FileManager.default.homeDirectoryForCurrentUser.path
+        address = location.directory?.path ?? location.archiveSource?.deletingLastPathComponent().path ?? FileManager.default.homeDirectoryForCurrentUser.path
         editing = true; focused = true
     }
 }

@@ -20,7 +20,7 @@ struct ExplorerAddressBar: View {
             HStack(spacing: 2) {
                 CommandIcon("Back (Alt+Left)", "arrow.left", disabled: !tab.history.canGoBack) { tab.back() }
                 CommandIcon("Forward (Alt+Right)", "arrow.right", disabled: !tab.history.canGoForward) { tab.forward() }
-                CommandIcon("Up (Alt+Up)", "arrow.up", disabled: tab.location.directory == nil) { tab.up() }
+                CommandIcon("Up (Alt+Up)", "arrow.up", disabled: tab.location.directory == nil && !tab.location.isArchive) { tab.up() }
                 CommandIcon("Refresh (F5)", "arrow.clockwise") { tab.refresh() }
             }.padding(.trailing, 5)
             addressField
@@ -28,7 +28,7 @@ struct ExplorerAddressBar: View {
         }.font(.system(size: 12)).foregroundStyle(ExplorerDesign.text).padding(.horizontal, 16)
             .frame(height: ExplorerDesign.addressHeight).background(ExplorerDesign.canvas)
             .onChange(of: workspace.addressFocused) { _, focused in
-                if focused { address = tab.location.directory?.path ?? FileManager.default.homeDirectoryForCurrentUser.path }; pathFocus = focused
+                if focused { address = tab.location.directory?.path ?? tab.location.archiveSource?.deletingLastPathComponent().path ?? FileManager.default.homeDirectoryForCurrentUser.path }; pathFocus = focused
             }
             .onChange(of: pathFocus) { _, focused in if !focused { workspace.addressFocused = false } }
             .onChange(of: workspace.searchFocused) { _, focused in searchFocus = focused }
@@ -46,19 +46,17 @@ struct ExplorerAddressBar: View {
                     let values = ancestors
                     let tail = geometry.size.width > 560 ? 3 : geometry.size.width > 360 ? 2 : 1
                     HStack(spacing: 7) {
-                        if values.isEmpty { Text(tab.location.title).lineLimit(1) }
+                        if values.isEmpty { Text(tab.location.isArchive ? tab.location.displayPath : tab.location.title).lineLimit(1).truncationMode(.middle) }
                         else {
                             if values.count > tail {
-                                Menu {
-                                    ForEach(values.dropLast(tail), id: \.self) { url in Button(title(url)) { workspace.navigate(.folder(url)) } }
-                                } label: { Image(systemName: "ellipsis").font(.system(size: 12)).frame(width: 18, height: 28) }
+                                Menu { ForEach(values.dropLast(tail), id: \.self) { url in Button(title(url)) { workspace.navigate(.folder(url)) } } }
+                                label: { Image(systemName: "ellipsis").font(.system(size: 12)).frame(width: 18, height: 28) }
                                     .menuStyle(.borderlessButton).menuIndicator(.hidden).help("Parent folders").accessibilityLabel("Parent folders")
                                 chevron
                             }
                             ForEach(values.suffix(tail), id: \.self) { url in
-                                Button { workspace.navigate(.folder(url)) } label: {
-                                    Text(title(url)).lineLimit(1).truncationMode(.middle).fontWeight(url == values.last ? .medium : .regular)
-                                }.buttonStyle(.plain).help(url.path)
+                                Button { workspace.navigate(.folder(url)) } label: { Text(title(url)).lineLimit(1).truncationMode(.middle).fontWeight(url == values.last ? .medium : .regular) }
+                                    .buttonStyle(.plain).help(url.path)
                                     .contextMenu { Button("Open in New Tab") { workspace.newTab(.folder(url)) }; Button("Copy Path") { NativeIntegration.copyPaths([url]) } }
                                 if url != values.last { chevron }
                             }
@@ -70,8 +68,9 @@ struct ExplorerAddressBar: View {
             Menu {
                 Button("Edit address") { workspace.addressFocused = true }
                 if let url = tab.location.directory { Button("Copy Path") { NativeIntegration.copyPaths([url]) } }
+                if let archive = tab.location.archiveSource { Button("Reveal Archive") { NSWorkspace.shared.activateFileViewerSelecting([archive]) } }
                 Divider()
-                ForEach(Array(tab.history.locations.enumerated()), id: \.offset) { _, location in Button(location.directory?.path ?? location.title) { workspace.navigate(location) } }
+                ForEach(Array(tab.history.locations.enumerated()), id: \.offset) { _, location in Button(location.displayPath) { workspace.navigate(location) } }
             } label: { Image(systemName: "chevron.down").font(.system(size: 9)).frame(width: 25, height: 30) }
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).accessibilityLabel("Address history")
         }.frame(height: 33).background(ExplorerDesign.canvas, in: RoundedRectangle(cornerRadius: 6))
@@ -100,8 +99,11 @@ struct SearchControls: View {
     @ObservedObject var tab: BrowserTab
     @EnvironmentObject private var preferences: PreferenceStore
     var body: some View {
-        ViewThatFits(in: .horizontal) { controls(showTitle: true); controls(showTitle: false) }
-            .font(.system(size: 11)).padding(10).background(ExplorerDesign.selection.opacity(0.45))
+        Group {
+            if tab.location.isArchive {
+                HStack { Label("Archive member names", systemImage: "doc.zipper"); Spacer(); Text("Current archive folder").foregroundStyle(.secondary) }
+            } else { ViewThatFits(in: .horizontal) { controls(showTitle: true); controls(showTitle: false) } }
+        }.font(.system(size: 11)).padding(10).background(ExplorerDesign.selection.opacity(0.45))
     }
     private func controls(showTitle: Bool) -> some View {
         HStack(spacing: 8) {
